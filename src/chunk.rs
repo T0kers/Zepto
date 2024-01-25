@@ -1,10 +1,24 @@
 use crate::value::*;
 
-pub struct OpCode;
-impl OpCode {
-    pub const CONSTANT: u8 = 0x00;
-    pub const RETURN: u8 = 0x01;
+macro_rules! generate_opcode {
+    ($n:expr;) => {};
+    ($n:expr; $name:ident $(, $rest:ident)*) => {
+        pub const $name: u8 = $n;
+
+        generate_opcode!($n + 1; $($rest),*);
+    };
+
+    ($($names:ident),+) => {
+        pub struct OpCode;
+        impl OpCode {
+            generate_opcode!(0; $($names),*);
+        }
+    };
 }
+
+
+generate_opcode!(CONSTANT, CONSTANT_LONG, RETURN);
+
 
 struct LineEnocding {
     amount: u32,
@@ -31,15 +45,23 @@ impl Chunk {
         self.code.push(opcode);
         self.add_line(line);
     }
-
-    pub fn add_constant(&mut self, value: Value) -> u8 {
+    pub fn add_constant(&mut self, value: Value) -> u16 {
         self.constants.push(value);
-        (self.constants.len() - 1).try_into().unwrap()
+        (self.constants.len() - 1).try_into().unwrap() // TODO: return error thing
     }
     pub fn write_constant(&mut self, value: Value, line: u32) {
-        self.add_opcode(OpCode::CONSTANT, line);
-        let index = self.add_constant(value);
-        self.add_opcode(index, line);
+        let index: u16 = self.add_constant(value); 
+        if index > (u8::MAX as u16) {
+            self.add_opcode(OpCode::CONSTANT_LONG, line);
+            let upper = (index >> 8) as u8;
+            let lower = (value & 0xFF) as u8;
+            self.add_opcode(upper, line);
+            self.add_opcode(lower, line);
+        }
+        else {
+            self.add_opcode(OpCode::CONSTANT, line);
+            self.add_opcode(index as u8, line);
+        }
     }
 
     pub fn line(&self, i: usize) -> u32 {
