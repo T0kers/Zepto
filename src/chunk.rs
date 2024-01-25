@@ -17,7 +17,7 @@ macro_rules! generate_opcode {
 }
 
 
-generate_opcode!(CONSTANT, CONSTANT_LONG, RETURN);
+generate_opcode!(CONSTANT, CONSTANT_LONG, RETURN, EOF);
 
 
 struct LineEnocding {
@@ -29,7 +29,6 @@ pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
     lines: Vec<LineEnocding>,
-    index: usize,
 }
 
 impl Chunk {
@@ -38,7 +37,6 @@ impl Chunk {
             code: vec![],
             constants: vec![],
             lines: vec![],
-            index: 0,
         }
     }
     pub fn add_opcode(&mut self, opcode: u8, line: u32) {
@@ -50,11 +48,11 @@ impl Chunk {
         (self.constants.len() - 1).try_into().unwrap() // TODO: return error thing
     }
     pub fn write_constant(&mut self, value: Value, line: u32) {
-        let index: u16 = self.add_constant(value); 
+        let index: u16 = self.add_constant(value);
         if index > (u8::MAX as u16) {
             self.add_opcode(OpCode::CONSTANT_LONG, line);
             let upper = (index >> 8) as u8;
-            let lower = (value & 0xFF) as u8;
+            let lower = (index & 0xFF) as u8;
             self.add_opcode(upper, line);
             self.add_opcode(lower, line);
         }
@@ -85,15 +83,6 @@ impl Chunk {
         }
         self.lines.push(LineEnocding{amount: 1, line});
     } 
-}
-
-impl Iterator for Chunk {
-    type Item = u8;
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.code.get(self.index).cloned();
-        self.index += 1;
-        result
-    }
 }
 
 impl Default for Chunk {

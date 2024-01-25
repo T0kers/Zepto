@@ -11,7 +11,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     }
 }
 
-fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
+pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
     print!("{:04} ", i);
     if i > 0 && chunk.line(i) == chunk.line(i - 1) {
         print!("   | ");
@@ -23,6 +23,7 @@ fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         OpCode::CONSTANT => constant_instruction("CONSTANT", chunk, i),
         OpCode::CONSTANT_LONG => constant_long_instruction("CONSTANT_LONG", chunk, i),
         OpCode::RETURN => simple_instruction("RETURN", i),
+        OpCode::EOF => simple_instruction("EOF", i),
         _ => {println!("????"); i + 1},
     }
 }
