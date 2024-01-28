@@ -1,7 +1,4 @@
-
-
 use crate::chunk::*;
-use crate::value::*;
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
@@ -22,6 +19,11 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
     match chunk.code[i] {
         OpCode::CONSTANT => constant_instruction("CONSTANT", chunk, i),
         OpCode::CONSTANT_LONG => constant_long_instruction("CONSTANT_LONG", chunk, i),
+        OpCode::ADD => simple_instruction("ADD", i),
+        OpCode::SUB => simple_instruction("SUB", i),
+        OpCode::MUL => simple_instruction("MUL", i),
+        OpCode::DIV => simple_instruction("DIV", i),
+        OpCode::NEG => simple_instruction("NEG", i),
         OpCode::RETURN => simple_instruction("RETURN", i),
         OpCode::EOF => simple_instruction("EOF", i),
         _ => {println!("????"); i + 1},
@@ -30,13 +32,13 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
 
 fn constant_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {
     let constant = chunk.code[i + 1];
-    println!("{} {} {}", name, constant, value_to_string(chunk.constants[constant as usize]));
+    println!("{} {} {}", name, constant, chunk.constants[constant as usize]);
     i + 2
 }
 
 fn constant_long_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {
     let constant: usize = ((chunk.code[i + 1] as usize) << 8) | (chunk.code[i + 2] as usize);
-    println!("{} {} {}", name, constant, value_to_string(chunk.constants[constant]));
+    println!("{} {} {}", name, constant, chunk.constants[constant]);
     i + 3
 }
 

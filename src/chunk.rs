@@ -1,4 +1,4 @@
-use crate::value::*;
+use crate::value::Value;
 
 macro_rules! generate_opcode {
     ($n:expr;) => {};
@@ -17,7 +17,7 @@ macro_rules! generate_opcode {
 }
 
 
-generate_opcode!(CONSTANT, CONSTANT_LONG, RETURN, EOF);
+generate_opcode!(CONSTANT, CONSTANT_LONG, ADD, SUB, MUL, DIV, NEG, RETURN, EOF);
 
 
 struct LineEnocding {
