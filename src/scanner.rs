@@ -21,6 +21,13 @@ pub enum TokenKind {
     // literals
     Identifier, String, Int,
 
+    // keywords
+    If, Else, For, While,
+	Set, Fn, Class, Selv,
+	Print, Return,
+	True, False,
+	Nul,
+
     // special
     Error(String),
     EOF,
@@ -34,7 +41,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(start: usize, end: usize, line: u32, kind: TokenKind) -> Self {
+    pub fn new(kind: TokenKind, start: usize, end: usize, line: u32) -> Self {
         Self {
             kind,
             start,
@@ -42,7 +49,31 @@ impl Token {
             line,
         }
     }
-    pub fn error(start: usize, end: usize, line: u32, msg: String) -> Self {
+    pub fn new_identifier(source: &str, start: usize, end: usize, line: u32) -> Self {
+        let mut chars = source[start..end].chars();
+        let kind;
+        if let Some(ch) = chars.nth(0) {
+            kind = match ch {
+                'c' => Token::check_keyword(chars.as_str(), "lass", TokenKind::Class),
+                _ => TokenKind::Identifier,
+            };
+        }
+        else {
+            kind = TokenKind::Identifier;
+        }
+
+        Self {
+            kind, 
+            start,
+            end,
+            line,
+        }
+    }
+    fn check_keyword(rest: &str, check: &str, kind: TokenKind) -> TokenKind {
+        if rest == check {kind}
+        else {TokenKind::Identifier}
+    }
+    pub fn error(msg: String, start: usize, end: usize, line: u32) -> Self {
         Self {
             kind: TokenKind::Error(msg),
             start,
@@ -73,57 +104,117 @@ impl<'a> Scanner<'a> {
         self.start = self.current;
 
         if self.is_at_end() {
-            return Token::new(self.start, self.current, self.line, TokenKind::EOF);
+            return Token::new(TokenKind::EOF, self.start, self.current, self.line);
         }
-        match self.advance() {
-            '(' => Token::new(self.start, self.current, self.line, TokenKind::LParen),
-            ')' => Token::new(self.start, self.current, self.line, TokenKind::RParen),
-            '[' => Token::new(self.start, self.current, self.line, TokenKind::LBracket),
-            ']' => Token::new(self.start, self.current, self.line, TokenKind::RBracket),
-            '{' => Token::new(self.start, self.current, self.line, TokenKind::LBrace),
-            '}' => Token::new(self.start, self.current, self.line, TokenKind::RBrace),
-            '+' => Token::new(self.start, self.current, self.line, TokenKind::Plus),
-            '-' => Token::new(self.start, self.current, self.line, TokenKind::Minus),
-            '/' => Token::new(self.start, self.current, self.line, TokenKind::Slash),
-            '.' => Token::new(self.start, self.current, self.line, TokenKind::Dot),
-            ',' => Token::new(self.start, self.current, self.line, TokenKind::Comma),
-            ':' => Token::new(self.start, self.current, self.line, TokenKind::Colon),
-            ';' => Token::new(self.start, self.current, self.line, TokenKind::Semicolon),
-            '!' => Token::new(self.start, self.current, self.line, if self.compare('=') {self.advance(); TokenKind::ExclamationEqual} else {TokenKind::Exclamation}), // ændre rækkefølge så først if, bagefter token::new(), ellers bliver den gamle current værdi brugt.
-            '=' => Token::new(self.start, self.current, self.line, if self.compare('=') {self.advance(); TokenKind::EqualEqual} else {TokenKind::Equal}),
-            '<' => Token::new(self.start, self.current, self.line, if self.compare('=') {self.advance(); TokenKind::LessEqual} else {TokenKind::Less}),
-            '>' => Token::new(self.start, self.current, self.line, if self.compare('=') {self.advance(); TokenKind::GreaterEqual} else {TokenKind::Greater}),
-            '&' => Token::new(self.start, self.current, self.line, if self.compare('&') {self.advance(); TokenKind::AndAnd} else {TokenKind::And}),
-            '|' => Token::new(self.start, self.current, self.line, if self.compare('|') {self.advance(); TokenKind::BarBar} else {TokenKind::Bar}),
-            '^' => Token::new(self.start, self.current, self.line, if self.compare('^') {self.advance(); TokenKind::CarrotCarrot} else {TokenKind::Carrot}),
-            '*' => Token::new(self.start, self.current, self.line, if self.compare('*') {self.advance(); TokenKind::StarStar} else {TokenKind::Star}),
-            _ => Token::error(self.start, self.current, self.line, String::from("bruh")),
+
+        if let Some(ch) = self.advance() {
+            match ch {
+                '(' => Token::new(TokenKind::LParen, self.start, self.current, self.line),
+                ')' => Token::new(TokenKind::RParen, self.start, self.current, self.line),
+                '[' => Token::new(TokenKind::LBracket, self.start, self.current, self.line),
+                ']' => Token::new(TokenKind::RBracket, self.start, self.current, self.line),
+                '{' => Token::new(TokenKind::LBrace, self.start, self.current, self.line),
+                '}' => Token::new(TokenKind::RBrace, self.start, self.current, self.line),
+                '+' => Token::new(TokenKind::Plus, self.start, self.current, self.line),
+                '-' => Token::new(TokenKind::Minus, self.start, self.current, self.line),
+                '/' => Token::new(TokenKind::Slash, self.start, self.current, self.line),
+                '.' => Token::new(TokenKind::Dot, self.start, self.current, self.line),
+                ',' => Token::new(TokenKind::Comma, self.start, self.current, self.line),
+                ':' => Token::new(TokenKind::Colon, self.start, self.current, self.line),
+                ';' => Token::new(TokenKind::Semicolon, self.start, self.current, self.line),
+                '!' => Token::new( if self.compare('=') {
+                    self.advance(); TokenKind::ExclamationEqual} else {TokenKind::Exclamation}, self.start, self.current, self.line),
+                '=' => Token::new( if self.compare('=') {
+                    self.advance(); TokenKind::EqualEqual} else {TokenKind::Equal}, self.start, self.current, self.line),
+                '<' => Token::new( if self.compare('=') {
+                    self.advance(); TokenKind::LessEqual} else {TokenKind::Less}, self.start, self.current, self.line),
+                '>' => Token::new( if self.compare('=') {
+                    self.advance(); TokenKind::GreaterEqual} else {TokenKind::Greater}, self.start, self.current, self.line),
+                '&' => Token::new( if self.compare('&') {
+                    self.advance(); TokenKind::AndAnd} else {TokenKind::And}, self.start, self.current, self.line),
+                '|' => Token::new( if self.compare('|') {
+                    self.advance(); TokenKind::BarBar} else {TokenKind::Bar}, self.start, self.current, self.line),
+                '^' => Token::new( if self.compare('^') {
+                    self.advance(); TokenKind::CarrotCarrot} else {TokenKind::Carrot}, self.start, self.current, self.line),
+                '*' => Token::new( if self.compare('*') {
+                    self.advance(); TokenKind::StarStar} else {TokenKind::Star}, self.start, self.current, self.line),
+                '"' => {
+                    while self.peek() != Some('"') && !self.is_at_end() {
+                        if let Some('\n') = self.peek() {self.line += 1}
+                        self.advance();
+                    }
+                    if self.is_at_end() {return Token::error(String::from("Unterminated string."), self.start, self.current, self.line)};
+                    self.advance();
+                    Token::new(TokenKind::String, self.start, self.current, self.line)
+                }
+                ch if ch.is_ascii_digit() => {
+                    while let Some(n) = self.peek() {
+                        if n.is_ascii_digit() {self.advance();}
+                        else {break;}
+                    }
+                    Token::new(TokenKind::Int, self.start, self.current, self.line)
+                }
+                ch if ch.is_alphabetic() || ch == '_' => {
+                    loop {
+                        if let Some(next) = self.peek() {
+                            if next.is_alphanumeric() || next == '|' {self.advance();}
+                            else {break;}
+                        }
+                    }
+                    Token::new_identifier(self.source, self.start, self.current, self.line)
+                }
+
+                _ => Token::error(String::from("bruh"), self.start, self.current, self.line),
+            }
         }
-        
+        else {
+            Token::error(String::from("Could not read token."), self.start, self.current, self.line)
+        }
     }
+    
     fn skip_whitespace(&mut self) {
         loop {
-            match self.peek() {
-                ' ' | '\r' | '\t' => {self.advance();},
-                '\n' => {self.line += 1; self.advance();}
-                _ => break,
+            if let Some(ch) = self.peek() {
+                match ch {
+                    ' ' | '\r' | '\t' => {self.advance();},
+                    '\n' => {self.line += 1; self.advance();}
+                    '/' => if self.peek_next() == Some('/') {
+                        while !self.is_at_end() && self.peek() != Some('\n') {self.advance();}
+                    }
+                    else {
+                        return;
+                    }
+                    _ => return,
+                }
+            }
+            else {
+                return;
             }
         }
     }
-    fn advance(&mut self) -> char {
+    
+    fn advance(&mut self) -> Option<char> {
         self.current += 1;
-        self.source.chars().nth(self.current - 1).unwrap()
+        self.source.chars().nth(self.current - 1)
     }
-    fn peek(&self) -> char {
-        self.source.chars().nth(self.current).unwrap()
+
+    fn peek(&self) -> Option<char> {
+        self.source.chars().nth(self.current)
     }
+
+    fn peek_next(&self) -> Option<char> {
+        if self.is_at_end() {None}
+        else {self.source.chars().nth(self.current + 1)}
+    }
+
     fn compare(&self, expected: char) -> bool {
         if self.is_at_end() {
             return false;
         }
-        expected == self.peek()
+        Some(expected) == self.peek()
     }
+
     fn is_at_end(&self) -> bool {
-        self.source.len() == self.current
+        self.source.len() <= self.current
     }
 }
