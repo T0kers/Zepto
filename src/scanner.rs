@@ -1,18 +1,19 @@
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Clone)]
 pub enum TokenKind {
     // single character
     LParen, RParen,
     LBracket, RBracket,
     LBrace, RBrace,
-    Plus, Minus, Slash,
+    Plus, Minus, Slash, Tilde,
     Dot, Comma, Colon, Semicolon,
 
     // one or two characters
     Exclamation, ExclamationEqual,
     Equal, EqualEqual,
-    Greater, GreaterEqual,
-    Less, LessEqual,
+    Greater, GreaterEqual, GreaterGreater,
+    Less, LessEqual, LessLess,
     And, AndAnd,
     Bar, BarBar,
     Carrot, CarrotCarrot,
@@ -33,6 +34,7 @@ pub enum TokenKind {
     EOF,
 }
 
+#[derive(Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub start: usize,
@@ -55,6 +57,27 @@ impl Token {
         if let Some(ch) = chars.nth(0) {
             kind = match ch {
                 'c' => Token::check_keyword(chars.as_str(), "lass", TokenKind::Class),
+                'i' => Token::check_keyword(chars.as_str(), "f", TokenKind::If),
+                'e' => Token::check_keyword(chars.as_str(), "lse", TokenKind::Else),
+                'f' => match chars.nth(0) {
+                    Some('a') => Token::check_keyword(chars.as_str(), "lse", TokenKind::False),
+                    Some('o') => Token::check_keyword(chars.as_str(), "r", TokenKind::For),
+                    Some('n') => Token::check_keyword(chars.as_str(), "", TokenKind::Fn),
+                    _ => TokenKind::Identifier,
+                }
+                'w' => Token::check_keyword(chars.as_str(), "hile", TokenKind::While),
+                's' => match chars.nth(0) {
+                    Some('e') => match chars.nth(0) {
+                        Some('t') => Token::check_keyword(chars.as_str(), "", TokenKind::Set),
+                        Some('l') => Token::check_keyword(chars.as_str(), "f", TokenKind::Selv),
+                        _ => TokenKind::Identifier,
+                    }
+                    _ => TokenKind::Identifier,
+                }
+                'p' => Token::check_keyword(chars.as_str(), "rint", TokenKind::Print),
+                'r' => Token::check_keyword(chars.as_str(), "eturn", TokenKind::Return),
+                't' => Token::check_keyword(chars.as_str(), "rue", TokenKind::True),
+                'n' => Token::check_keyword(chars.as_str(), "ul", TokenKind::Nul),
                 _ => TokenKind::Identifier,
             };
         }
@@ -81,10 +104,13 @@ impl Token {
             line,
         }
     }
+    pub fn lexeme<'a>(&self, source: &'a str) -> &'a str {
+        &source[self.start..self.end]
+    }
 }
 
 pub struct Scanner<'a> {
-    source: &'a str,
+    pub source: &'a str,
     start: usize,
     current: usize,
     line: u32,
@@ -118,6 +144,7 @@ impl<'a> Scanner<'a> {
                 '+' => Token::new(TokenKind::Plus, self.start, self.current, self.line),
                 '-' => Token::new(TokenKind::Minus, self.start, self.current, self.line),
                 '/' => Token::new(TokenKind::Slash, self.start, self.current, self.line),
+                '~' => Token::new(TokenKind::Tilde, self.start, self.current, self.line),
                 '.' => Token::new(TokenKind::Dot, self.start, self.current, self.line),
                 ',' => Token::new(TokenKind::Comma, self.start, self.current, self.line),
                 ':' => Token::new(TokenKind::Colon, self.start, self.current, self.line),
@@ -127,9 +154,15 @@ impl<'a> Scanner<'a> {
                 '=' => Token::new( if self.compare('=') {
                     self.advance(); TokenKind::EqualEqual} else {TokenKind::Equal}, self.start, self.current, self.line),
                 '<' => Token::new( if self.compare('=') {
-                    self.advance(); TokenKind::LessEqual} else {TokenKind::Less}, self.start, self.current, self.line),
+                    self.advance(); TokenKind::LessEqual
+                } else if self.compare('<') {
+                    self.advance(); TokenKind::LessLess
+                } else {TokenKind::Less}, self.start, self.current, self.line),
                 '>' => Token::new( if self.compare('=') {
-                    self.advance(); TokenKind::GreaterEqual} else {TokenKind::Greater}, self.start, self.current, self.line),
+                    self.advance(); TokenKind::GreaterEqual
+                } else if self.compare('>') {
+                    self.advance(); TokenKind::GreaterGreater
+                } else {TokenKind::Greater}, self.start, self.current, self.line),
                 '&' => Token::new( if self.compare('&') {
                     self.advance(); TokenKind::AndAnd} else {TokenKind::And}, self.start, self.current, self.line),
                 '|' => Token::new( if self.compare('|') {
@@ -155,11 +188,9 @@ impl<'a> Scanner<'a> {
                     Token::new(TokenKind::Int, self.start, self.current, self.line)
                 }
                 ch if ch.is_alphabetic() || ch == '_' => {
-                    loop {
-                        if let Some(next) = self.peek() {
-                            if next.is_alphanumeric() || next == '|' {self.advance();}
-                            else {break;}
-                        }
+                    while let Some(next) = self.peek() {
+                        if next.is_alphanumeric() || next == '|' {self.advance();}
+                        else {break;}
                     }
                     Token::new_identifier(self.source, self.start, self.current, self.line)
                 }

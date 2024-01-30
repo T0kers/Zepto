@@ -1,21 +1,68 @@
-use crate::{scanner::Scanner, scanner::TokenKind, vm::VMError, chunk::Chunk};
+use std::io::{self, Write};
 
-pub fn compile(source: &str) -> Result<Chunk, VMError> {
-    let mut scanner = Scanner::new(source);
-    let mut line: u32 = 0;
-    loop {
-        let token = scanner.scan_token();
-        if token.line != line {
-            line = token.line;
-            print!("{:4} ", line);
-        }
-        else {
-            print!("   | ");
-        }
-        println!("{:?} {}", token.kind, source[token.start..token.end].to_string());
-        if token.kind == TokenKind::EOF {
-            break;
+use crate::{scanner::Scanner, scanner::TokenKind, scanner::Token, vm::VMError, chunk::Chunk};
+
+pub struct Compiler<'a> {
+    current: Token,
+    previous: Token,
+    scanner: Scanner<'a>,
+    pub chunk: Chunk,
+    had_error: bool
+}
+
+impl<'a> Compiler<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Self {
+            current: Token::new(TokenKind::Nul, 0, 0, 0),
+            previous: Token::new(TokenKind::Nul, 0, 0, 0),
+            scanner: Scanner::new(source),
+            chunk: Chunk::new(),
+            had_error: false,
         }
     }
-    Err(VMError::CompileError)
+    pub fn compile(&mut self) -> Result<(), VMError> {
+        loop {
+            let token = self.scanner.scan_token();
+            
+            if token.kind == TokenKind::EOF {
+                break;
+            }
+        }
+        if self.had_error {
+            Err(VMError::CompileError)
+        }
+        else {
+            Ok(())
+        }
+    }
+    fn advance(&mut self) {
+        self.previous = self.current.clone();
+        loop {
+            self.current = self.scanner.scan_token();
+            if let TokenKind::Error(e) = self.current.kind.clone() {
+                self.error_at_current(&e);
+            }
+            else {
+                break;
+            }
+        }
+    }
+    fn error_at_current(&mut self, msg: &str) {
+        self.error_at(self.current.clone(), msg);
+    }
+    fn error(&mut self, msg: &str) {
+        self.error_at(self.previous.clone(), msg);
+    }
+    fn error_at(&mut self, token: Token, msg: &str) {
+        eprint!("[Line {}] Error", token.line);
+        io::stdout().flush().unwrap();
+        match token.kind {
+            TokenKind::EOF => eprint!(" at end"),
+            _ => eprint!(" at {}", token.lexeme(self.scanner.source))
+        }
+        eprintln!(": {}", msg);
+        self.had_error = true;
+    }
 }
+
+

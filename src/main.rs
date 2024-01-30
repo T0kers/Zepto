@@ -52,6 +52,7 @@ fn main() {
 fn repl() {
     let mut line = String::new();
     loop {
+        line.clear();
         print!(">");
         io::stdout().flush().unwrap();
         io::stdin().read_line(&mut line).expect("Something went wrong when reading input.");
