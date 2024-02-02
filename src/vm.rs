@@ -25,6 +25,9 @@ impl<'a> VM<'a> {
             stack_top: stack.as_mut_ptr(),
         }
     }
+    fn reset_stack(&mut self) {
+        self.stack_top = self.stack.as_mut_ptr();
+    }
     unsafe fn read_byte(&mut self) -> u8 {
         let instruction = *self.ip;
         self.ip = self.ip.add(1);
@@ -35,8 +38,24 @@ impl<'a> VM<'a> {
         macro_rules! binary_op {
             ($oper:tt) => {
                 {
-                    let Value::Int(b) = self.pop() else {return Err(VMError::RuntimeError)};
-                    let Value::Int(a) = self.pop() else {return Err(VMError::RuntimeError)};
+                    let b;
+                    match self.pop() {
+                        Value::Int(num) => b = num,
+                        Value::Bool(boolean) => b = boolean as i64,
+                        _ => {
+                            self.runtime_error("Operand must be an integer or boolean.");
+                            return Err(VMError::RuntimeError)
+                        },
+                    }
+                    let a;
+                    match self.pop() {
+                        Value::Int(num) => a = num,
+                        Value::Bool(boolean) => a = boolean as i64,
+                        _ => {
+                            self.runtime_error("Operand must be an integer or boolean.");
+                            return Err(VMError::RuntimeError)
+                        },
+                    }
                     self.push(Value::Int(a $oper b));
                 }
             };
@@ -68,12 +87,15 @@ impl<'a> VM<'a> {
                         let constant = self.chunk.constants[index];
                         self.push(constant);
                     }
+                    OpCode::TRUE => self.push(Value::Bool(true)),
+                    OpCode::FALSE => self.push(Value::Bool(false)),
+                    OpCode::NUL => self.push(Value::Nul),
                     OpCode::ADD => binary_op!(+),
                     OpCode::SUB => binary_op!(-),
                     OpCode::MUL => binary_op!(*),
                     OpCode::DIV => binary_op!(/),
                     OpCode::NEG => {
-                        match self.pop() {
+                        match self.pop() { // TODO: maybe do not pop here because it might effect garbage collection. https://craftinginterpreters.com/types-of-values.html
                             Value::Int(n) => self.push(Value::Int(-n)),
                             Value::Bool(b) => self.push(Value::Int(-(b as i64))),
                             Value::Nul => return Err(VMError::RuntimeError),
@@ -81,7 +103,10 @@ impl<'a> VM<'a> {
                     }
                     OpCode::RETURN => {println!("Value: {:?}", self.pop())},
                     OpCode::EOF => return Ok(()),
-                    _ => return Err(VMError::RuntimeError),
+                    _ => {
+                        self.runtime_error("Operand must be a number.");
+                        return Err(VMError::RuntimeError);
+                    },
                 }
             }
         }
@@ -96,5 +121,10 @@ impl<'a> VM<'a> {
     }
     unsafe fn peek(&mut self, distance: usize) {
         self.stack_top.sub(1 + distance);
+    }
+    unsafe fn runtime_error(&mut self, msg: &str) { // this function should maybe be turned into a macro.
+        eprintln!("{}", msg);
+        eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
+        self.reset_stack();
     }
 }

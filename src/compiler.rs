@@ -190,6 +190,14 @@ impl<'a> Compiler<'a> {
         let value: i64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
         self.emit_constant(Value::Int(value));
     }
+    fn emit_literal(&mut self) {
+        self.emit_byte(match self.previous.kind {
+            TokenKind::True => OpCode::TRUE,
+            TokenKind::False => OpCode::FALSE,
+            TokenKind::Nul => OpCode::NUL,
+            _ => unreachable!(),
+        })
+    }
     fn emit_constant(&mut self, value: Value) {
         let prev_line = self.previous.line;
         if self.current_chunk().write_constant(value, prev_line).is_err() {
@@ -219,6 +227,7 @@ impl<'a> Compiler<'a> {
         static MINUS_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), Some(|s| s.binary()), Precedence::Term);
         static TERM_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Factor);
         static INT_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_number()), None, Precedence::None);
+        static LITERAL_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_literal()), None, Precedence::None);
         static DEFAULT_RULE: ParseRule = ParseRule::new(None, None, Precedence::None);
 
         match kind {
@@ -227,6 +236,7 @@ impl<'a> Compiler<'a> {
             TK::Minus => &MINUS_RULE,
             TK::Star | TK::Slash => &TERM_RULE,
             TK::Int => &INT_RULE,
+            TK::True | TK::False | TK::Nul => &LITERAL_RULE,
             _ => &DEFAULT_RULE,
         }
     }

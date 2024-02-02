@@ -20,6 +20,9 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
     match chunk.code[i] {
         OpCode::CONSTANT => constant_instruction("CONSTANT", chunk, i),
         OpCode::CONSTANT_LONG => constant_long_instruction("CONSTANT_LONG", chunk, i),
+        OpCode::TRUE => simple_instruction("TRUE", i),
+        OpCode::FALSE => simple_instruction("FALSE", i),
+        OpCode::NUL => simple_instruction("NUL", i),
         OpCode::ADD => simple_instruction("ADD", i),
         OpCode::SUB => simple_instruction("SUB", i),
         OpCode::MUL => simple_instruction("MUL", i),

@@ -22,23 +22,7 @@ fn main() {
         1 => repl(),
         2 => run_file(&args[1]),
         _ => eprintln!("Too many arguments provided.")
-    }
-
-
-    // let val = Value::Int(2);
-    // println!("{}", std::mem::size_of_val(&val));
-
-    // let mut vm: VM = VM::new();
-    
-    // vm.chunk.write_constant(Value::Int(3), 1);
-    // vm.chunk.write_constant(Value::Int(4), 1);
-    // vm.chunk.write_constant(Value::Int(5), 1);
-    // vm.chunk.add_opcode(OpCode::ADD, 2);
-    // vm.chunk.add_opcode(OpCode::MUL, 2);
-    // vm.chunk.add_opcode(OpCode::RETURN, 2);
-    // vm.chunk.add_opcode(OpCode::EOF, 3);
-    // debug::disassemble_chunk(&vm.chunk, "Test chunk");
-    
+    }    
 }
 
 
