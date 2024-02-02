@@ -1,11 +1,12 @@
 use crate::chunk::*;
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
-    println!("== {} ==", name);
+    println!("==== {} ====", name);
     let mut i: usize = 0;
     while i < chunk.code.len() {
         i = disassemble_instruction(chunk, i);
     }
+    println!("{}", String::from_utf8(vec![b'='; name.len() + 10]).unwrap());
 }
 
 pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {

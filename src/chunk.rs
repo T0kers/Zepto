@@ -1,4 +1,5 @@
 use crate::value::Value;
+use std::num::TryFromIntError;
 
 macro_rules! generate_opcode {
     ($n:expr;) => {};
@@ -43,12 +44,12 @@ impl Chunk {
         self.code.push(opcode);
         self.add_line(line);
     }
-    pub fn add_constant(&mut self, value: Value) -> u16 {
+    pub fn add_constant(&mut self, value: Value) -> Result<u16, TryFromIntError> {
         self.constants.push(value);
-        (self.constants.len() - 1).try_into().unwrap() // TODO: return error thing
+        (self.constants.len() - 1).try_into()
     }
-    pub fn write_constant(&mut self, value: Value, line: u32) {
-        let index: u16 = self.add_constant(value);
+    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), TryFromIntError> {
+        let index: u16 = self.add_constant(value)?;
         if index > (u8::MAX as u16) {
             self.add_opcode(OpCode::CONSTANT_LONG, line);
             let upper = (index >> 8) as u8;
@@ -60,6 +61,7 @@ impl Chunk {
             self.add_opcode(OpCode::CONSTANT, line);
             self.add_opcode(index as u8, line);
         }
+        Ok(())
     }
 
     pub fn line(&self, i: usize) -> u32 {
