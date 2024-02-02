@@ -13,38 +13,15 @@ use std::fs;
 use std::io;
 use std::io::Write;
 
-//extern crate clap;
-use clap::Parser;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short, long)]
-    file_path: String,
-}
-
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
 
-    // let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().collect();
 
-    let matches = Command::new("Zepto")
-        .arg(
-            Arg::new("filepath")
-                .required(false)
-                .index(1)
-                .default_value("")
-        )
-        .arg(
-            Arg::new("print-code")
-                .long("print_code")
-        ).get_matches();
-
-    if matches.is_present("filepath") {
-        run_file(matches.value_of("filepath").unwrap());
-    }
-    else {
-        repl();
+    match args.len() {
+        1 => repl(),
+        2 => run_file(&args[1]),
+        _ => eprintln!("Too many arguments provided.")
     }
 
 

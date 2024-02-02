@@ -45,13 +45,17 @@ impl<'a> VM<'a> {
         self.stack_top = self.stack.as_mut_ptr();
         unsafe {
             loop {
-                print!("        [ ");
-                let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
-                for index in 0..stack_size {
-                    print!("{} ", self.stack[index]);
+                #[cfg(feature = "debug_code")]
+                {
+                    print!("        [ ");
+                    let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
+                    for index in 0..stack_size {
+                        print!("{} ", self.stack[index]);
+                    }
+                    println!("]");
+                    debug::disassemble_instruction(&self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
                 }
-                println!("]");
-                debug::disassemble_instruction(&self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
+                
                 match self.read_byte() {
                     OpCode::CONSTANT => {
                         let index = self.read_byte() as usize;
@@ -69,11 +73,10 @@ impl<'a> VM<'a> {
                     OpCode::MUL => binary_op!(*),
                     OpCode::DIV => binary_op!(/),
                     OpCode::NEG => {
-                        if let Value::Int(n) = self.pop() {
-                            self.push(Value::Int(-n));
-                        }
-                        else {
-                            return Err(VMError::RuntimeError);
+                        match self.pop() {
+                            Value::Int(n) => self.push(Value::Int(-n)),
+                            Value::Bool(b) => self.push(Value::Int(-(b as i64))),
+                            Value::Nul => return Err(VMError::RuntimeError),
                         }
                     }
                     OpCode::RETURN => {println!("Value: {:?}", self.pop())},
