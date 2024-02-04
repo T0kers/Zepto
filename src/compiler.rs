@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError, debug::disassemble_chunk};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError};
 
 pub struct Compiler<'a> {
     current: Token,
@@ -37,7 +37,8 @@ impl<'a> Compiler<'a> {
         else {
             #[cfg(feature = "print_code")]
             {
-                disassemble_chunk(self.current_chunk(), "bytecode");
+                use crate::debug;
+                debug::disassemble_chunk(self.current_chunk(), "bytecode");
             }
             Ok(())
         }

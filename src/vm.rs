@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, debug};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
 
 
 pub enum VMError {
@@ -142,6 +142,7 @@ impl<'a> VM<'a> {
             loop {
                 #[cfg(feature = "debug_code")]
                 {
+                    use crate::debug;
                     print!("        [ ");
                     let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
                     for index in 0..stack_size {
