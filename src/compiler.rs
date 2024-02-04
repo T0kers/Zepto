@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{chunk::{Chunk, OpCode}, debug::disassemble_chunk, scanner::Scanner, scanner::Token, scanner::TokenKind, value::Value, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError};
 
 pub struct Compiler<'a> {
     current: Token,
@@ -157,13 +157,13 @@ impl<'a> Compiler<'a> {
             TokenKind::Star => {self.emit_byte(OpCode::MUL)},
             TokenKind::Slash => {self.emit_byte(OpCode::DIV)},
             TokenKind::StarStar => {},
-            TokenKind::ExclamationEqual => {self.emit_byte(OpCode::EQUAL); self.emit_byte(OpCode::NOT);}, // TODO: maybe create custom instruction
+            TokenKind::ExclamationEqual => {self.emit_bytes(OpCode::EQUAL, OpCode::NOT);}, // TODO: maybe create custom instruction
             TokenKind::EqualEqual => {self.emit_byte(OpCode::EQUAL);},
             TokenKind::Greater => {self.emit_byte(OpCode::GREATER);},
-            TokenKind::GreaterEqual => {self.emit_byte(OpCode::LESS); self.emit_byte(OpCode::NOT);},  // TODO: maybe create custom instruction
+            TokenKind::GreaterEqual => {self.emit_bytes(OpCode::LESS, OpCode::NOT);},  // TODO: maybe create custom instruction
             TokenKind::GreaterGreater => {},
             TokenKind::Less => {self.emit_byte(OpCode::LESS);},
-            TokenKind::LessEqual => {self.emit_byte(OpCode::GREATER); self.emit_byte(OpCode::NOT);},  // TODO: maybe create custom instruction
+            TokenKind::LessEqual => {self.emit_bytes(OpCode::GREATER, OpCode::NOT);},  // TODO: maybe create custom instruction
             TokenKind::LessLess => {},
             TokenKind::And => {},
             TokenKind::AndAnd => {},
@@ -190,11 +190,11 @@ impl<'a> Compiler<'a> {
         match self.previous.kind {
             TokenKind::Int => {
                 let value: i64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
-                self.emit_constant(Value::Int(value));
+                self.emit_constant(Value::Num(Number::Int(value)));
             },
             TokenKind::Float => {
                 let value: f64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
-                self.emit_constant(Value::Float(value));
+                self.emit_constant(Value::Num(Number::Float(value)));
             },
             _ => unreachable!(),
         }

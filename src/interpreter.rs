@@ -1,4 +1,4 @@
-use crate::{compiler::Compiler, vm::VMError, vm::VM};
+use crate::{compiler::Compiler, vm::{VM, VMError}};
 
 pub fn interpret(source: &str) -> Result<(), VMError> {
     let mut compiler = Compiler::new(source);

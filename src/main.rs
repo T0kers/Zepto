@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 pub mod chunk;
 pub mod debug;
 pub mod value;
@@ -7,15 +9,13 @@ pub mod compiler;
 pub mod scanner;
 
 use vm::VMError;
-
-use std::env;
-use std::fs;
-use std::io;
-use std::io::Write;
+use value::Value;
+use std::{env, fs, io::{self, Write}};
 
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
-    println!("{}", i64::MAX);
+    println!("i64::MAX: {}", i64::MAX);
+    println!("Size of Value: {}", ::std::mem::size_of::<Value>());
     let args: Vec<String> = env::args().collect();
 
     match args.len() {

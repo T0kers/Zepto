@@ -1,5 +1,4 @@
-use crate::{chunk::Chunk, debug, chunk::OpCode, value::Value};
-
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
 
 
 pub enum VMError {
@@ -14,72 +13,106 @@ pub struct VM<'a> {
     stack_top: *mut Value,
 }
 
-macro_rules! build_op {
-    ($name:ident, $checked:ident, $op:tt) => {
-        unsafe fn $name(&mut self) -> Result<(), VMError> {
-            let b: i64 = match self.pop() {
-                Value::Bool(b) => b as i64,
-                Value::Float(b) => {
-                    let a: f64 = match self.pop() {
-                        Value::Bool(a) => a as u8 as f64,
-                        Value::Int(a) => a as f64,
-                        Value::Float(a) => a,
-                        Value::Nul => return self.runtime_error("Operand can't be nul."),
-                    };
-                    self.push(Value::Float(a $op b));
-                    return Ok(());
-                },
-                Value::Int(b) => b,
-                Value::Nul => return self.runtime_error("Operand can't be nul."),
-            };
-            let a: i64 = match self.pop() {
-                Value::Bool(a) => a as i64,
-                Value::Int(a) => a as i64,
-                Value::Float(a) => {
-                    self.push(Value::Float(a $op b as f64));
-                    return Ok(());
-                },
-                Value::Nul => return self.runtime_error("Operand can't be nul."),
-            };
-            match a.$checked(b) {
-                Some(n) => self.push(Value::Int(n)),
-                None => self.push(Value::Float(a as f64 $op b as f64)),
+macro_rules! build_comparison_op {
+    ($name:ident, $oper:tt) => {
+        pub unsafe fn $name(&mut self) -> Result<(), VMError> {
+            let b = self.pop();
+            let a = self.pop();
+            match (a, b) {
+                (Value::Num(a), Value::Num(b)) => self.push(Value::Bool(a $oper b)),
+                (Value::Bool(a), Value::Bool(b)) => self.push(Value::Bool(a $oper b)),
+                (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a $oper Number::Int(b as i64))),
+                (Value::Bool(a), Value::Num(b)) => self.push(Value::Bool(Number::Int(a as i64) $oper b)),
+                (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+                (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
             }
             Ok(())
         }
     };
 }
 
-macro_rules! build_compare {
-    ($name:ident, $oper:tt) => {
-        unsafe fn $name(&mut self) -> Result<(), VMError> {
-            let b: f64 = match self.pop() {
-                Value::Int(num) => num as f64,
-                Value::Float(num) => num,
-                Value::Bool(boolean) => boolean as i64 as f64,
-                Value::Nul => return self.runtime_error("Operands must be an integer or boolean."),
-            };
-            let a: f64 = match self.pop() {
-                Value::Int(num) => num as f64,
-                Value::Float(num) => num,
-                Value::Bool(boolean) => boolean as i64 as f64,
-                Value::Nul => return self.runtime_error("Operands must be an integer or boolean."),
-            };
-            self.push(Value::Bool(a $oper b));
-            Ok(())
-        }
-    };
-}
-
 impl<'a> VM<'a> {
-    build_op!(add, checked_add, +);
-    build_op!(sub, checked_sub, -);
-    build_op!(mul, checked_mul, *);
-    build_op!(div, checked_div, /);
-    build_compare!(equal, ==);
-    build_compare!(less, <);
-    build_compare!(greater, >);
-
+    pub unsafe fn add(&mut self) -> Result<(), VMError> {
+        let b = self.pop();
+        let a = self.pop();
+        match (a, b) {
+            (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a + b)),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 + b as i64))),
+            (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a + Number::Int(b as i64))),
+            (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) + b)),
+            (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+            (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+            _ => return self.runtime_error("Unexpected operand types."),
+        }
+        Ok(())
+    }
+    pub unsafe fn sub(&mut self) -> Result<(), VMError> {
+        let b = self.pop();
+        let a = self.pop();
+        match (a, b) {
+            (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a - b)),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 - b as i64))),
+            (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a - Number::Int(b as i64))),
+            (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) - b)),
+            (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+            (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+            _ => return self.runtime_error("Unexpected operand types."),
+        }
+        Ok(())
+    }
+    pub unsafe fn mul(&mut self) -> Result<(), VMError> {
+        let b = self.pop();
+        let a = self.pop();
+        match (a, b) {
+            (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a * b)),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 * b as i64))),
+            (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a * Number::Int(b as i64))),
+            (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) * b)),
+            (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+            (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+            _ => return self.runtime_error("Unexpected operand types."),
+        }
+        Ok(())
+    }
+    pub unsafe fn div(&mut self) -> Result<(), VMError> {
+        let b = self.pop();
+        let a = self.pop();
+        match (a, b) {
+            (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a / b)),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 / b as i64))),
+            (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a / Number::Int(b as i64))),
+            (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) / b)),
+            (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+            (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+            _ => return self.runtime_error("Unexpected operand types."),
+        }
+        Ok(())
+    }
+    pub unsafe fn neg(&mut self) -> Result<(), VMError> {
+        match self.pop() {
+            Value::Num(a) => self.push(Value::Num(-a)),
+            Value::Bool(a) => self.push(Value::Num(Number::Int(-(a as i64)))),
+            Value::Nul => return self.runtime_error("Operand was nul."),
+            _ => return self.runtime_error("Unexpected operand type."),
+        }
+        Ok(())
+    }
+    pub unsafe fn equal(&mut self) -> Result<(), VMError> {
+        let b = self.pop();
+        let a = self.pop();
+        match (a, b) {
+            (Value::Num(a), Value::Num(b)) => self.push(Value::Bool(a == b)),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Bool(a == b)),
+            (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a == Number::Int(b as i64))),
+            (Value::Bool(a), Value::Num(b)) => self.push(Value::Bool(Number::Int(a as i64) == b)),
+            (Value::Nul, Value::Nul) => self.push(Value::Bool(true)),
+            (Value::Nul, _) => self.push(Value::Bool(false)),
+            (_, Value::Nul) => self.push(Value::Bool(false)),
+        }
+        Ok(())
+    }
+    build_comparison_op!(less, <);
+    build_comparison_op!(greater, >);
 }
 
 impl<'a> VM<'a> {
@@ -137,19 +170,12 @@ impl<'a> VM<'a> {
                     OpCode::SUB => self.sub()?,
                     OpCode::MUL => self.mul()?,
                     OpCode::DIV => self.div()?,
-                    OpCode::UMINUS => {
-                        match self.pop() { // TODO: maybe do not pop here because it might effect garbage collection. https://craftinginterpreters.com/types-of-values.html
-                            Value::Int(i) => self.push(Value::Int(-i)),
-                            Value::Float(n) => self.push(Value::Float(-n)),
-                            Value::Bool(b) => self.push(Value::Int(-(b as i64))),
-                            Value::Nul => return Err(VMError::RuntimeError),
-                        }
-                    }
+                    OpCode::UMINUS => self.neg()?,
                     OpCode::EQUAL => self.equal()?,
                     OpCode::LESS => self.less()?,
                     OpCode::GREATER => self.greater()?,
                     OpCode::NOT => {
-                        let result = !self.pop().to_bool();
+                        let result = !self.pop().as_bool();
                         self.push(Value::Bool(result));
                     }
                     
@@ -171,10 +197,11 @@ impl<'a> VM<'a> {
         self.stack_top = self.stack_top.sub(1);
         *self.stack_top
     }
-    unsafe fn peek(&mut self, distance: usize) {
-        self.stack_top.sub(1 + distance);
+    unsafe fn peek(&mut self, distance: usize) -> Value {
+        *self.stack_top.sub(1 + distance)
     }
-    unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // this function should maybe be turned into a macro.
+
+    pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
         eprintln!("{}", msg);
         eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
         self.reset_stack();

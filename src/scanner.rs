@@ -1,6 +1,4 @@
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     // single character
     LParen, RParen,
