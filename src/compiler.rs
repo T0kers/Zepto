@@ -140,10 +140,10 @@ impl<'a> Compiler<'a> {
         let oper_kind = self.previous.kind.clone();
         self.parse_precedence(Precedence::Unary);
         match oper_kind {
-            TokenKind::Minus => {self.emit_byte(OpCode::NEG)},
+            TokenKind::Minus => {self.emit_byte(OpCode::UMINUS)},
             TokenKind::Tilde => {},
-            TokenKind::Exclamation => {},
-            _ => {}, // unreachable
+            TokenKind::Exclamation => {self.emit_byte(OpCode::NOT)},
+            _ => unreachable!()
         }
     }
     fn binary(&mut self) {
@@ -157,13 +157,13 @@ impl<'a> Compiler<'a> {
             TokenKind::Star => {self.emit_byte(OpCode::MUL)},
             TokenKind::Slash => {self.emit_byte(OpCode::DIV)},
             TokenKind::StarStar => {},
-            TokenKind::ExclamationEqual => {},
-            TokenKind::EqualEqual => {},
-            TokenKind::Greater => {},
-            TokenKind::GreaterEqual => {},
+            TokenKind::ExclamationEqual => {self.emit_byte(OpCode::EQUAL); self.emit_byte(OpCode::NOT);}, // TODO: maybe create custom instruction
+            TokenKind::EqualEqual => {self.emit_byte(OpCode::EQUAL);},
+            TokenKind::Greater => {self.emit_byte(OpCode::GREATER);},
+            TokenKind::GreaterEqual => {self.emit_byte(OpCode::LESS); self.emit_byte(OpCode::NOT);},  // TODO: maybe create custom instruction
             TokenKind::GreaterGreater => {},
-            TokenKind::Less => {},
-            TokenKind::LessEqual => {},
+            TokenKind::Less => {self.emit_byte(OpCode::LESS);},
+            TokenKind::LessEqual => {self.emit_byte(OpCode::GREATER); self.emit_byte(OpCode::NOT);},  // TODO: maybe create custom instruction
             TokenKind::LessLess => {},
             TokenKind::And => {},
             TokenKind::AndAnd => {},
@@ -171,7 +171,7 @@ impl<'a> Compiler<'a> {
             TokenKind::BarBar => {},
             TokenKind::Carrot => {},
             TokenKind::CarrotCarrot => {},
-            _ => {}, // unreachable
+            _ => unreachable!()
         }
     }
 }
@@ -187,8 +187,17 @@ impl<'a> Compiler<'a> {
         self.emit_byte(byte2);
     }
     fn emit_number(&mut self) {
-        let value: i64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
-        self.emit_constant(Value::Int(value));
+        match self.previous.kind {
+            TokenKind::Int => {
+                let value: i64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
+                self.emit_constant(Value::Int(value));
+            },
+            TokenKind::Float => {
+                let value: f64 = self.previous.lexeme(self.scanner.source).parse().unwrap();
+                self.emit_constant(Value::Float(value));
+            },
+            _ => unreachable!(),
+        }
     }
     fn emit_literal(&mut self) {
         self.emit_byte(match self.previous.kind {
@@ -223,10 +232,15 @@ impl<'a> Compiler<'a> {
     fn get_rule(&self, kind: &TokenKind) -> &'static ParseRule {
         use TokenKind as TK;
         static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s| s.grouping()), None, Precedence::None);
+
+        static EQUALITY_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Equality);
+        static COMPARISON_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Comparison);
+
         static PLUS_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Term);
         static MINUS_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), Some(|s| s.binary()), Precedence::Term);
+        static UNARY_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), None, Precedence::None);
         static TERM_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Factor);
-        static INT_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_number()), None, Precedence::None);
+        static NUMBER_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_number()), None, Precedence::None);
         static LITERAL_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_literal()), None, Precedence::None);
         static DEFAULT_RULE: ParseRule = ParseRule::new(None, None, Precedence::None);
 
@@ -234,9 +248,12 @@ impl<'a> Compiler<'a> {
             TK::LParen => &LPAREN_RULE,
             TK::Plus => &PLUS_RULE,
             TK::Minus => &MINUS_RULE,
+            TK::Exclamation => &UNARY_RULE,
             TK::Star | TK::Slash => &TERM_RULE,
-            TK::Int => &INT_RULE,
+            TK::Int | TK::Float => &NUMBER_RULE,
             TK::True | TK::False | TK::Nul => &LITERAL_RULE,
+            TK::EqualEqual | TK::ExclamationEqual => &EQUALITY_RULE,
+            TK::Greater | TK::GreaterEqual |TK::Less | TK::LessEqual => &COMPARISON_RULE,
             _ => &DEFAULT_RULE,
         }
     }

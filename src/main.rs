@@ -15,7 +15,7 @@ use std::io::Write;
 
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
-
+    println!("{}", i64::MAX);
     let args: Vec<String> = env::args().collect();
 
     match args.len() {

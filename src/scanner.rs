@@ -20,7 +20,7 @@ pub enum TokenKind {
     Star, StarStar,
 
     // literals
-    Identifier, String, Int,
+    Identifier, String, Int, Float,
 
     // keywords
     If, Else, For, While,
@@ -184,6 +184,19 @@ impl<'a> Scanner<'a> {
                     while let Some(n) = self.peek() {
                         if n.is_ascii_digit() {self.advance();}
                         else {break;}
+                    }
+                    if let Some('.') = self.peek() {
+                        if let Some(ch) = self.peek_next() {
+                            if ch.is_ascii_digit() {
+                                self.advance();
+                                self.advance();
+                                while let Some(n) = self.peek() {
+                                    if n.is_ascii_digit() {self.advance();}
+                                    else {break;}
+                                }
+                                return Token::new(TokenKind::Float, self.start, self.current, self.line);
+                            }
+                        }
                     }
                     Token::new(TokenKind::Int, self.start, self.current, self.line)
                 }

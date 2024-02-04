@@ -18,7 +18,14 @@ macro_rules! generate_opcode {
 }
 
 
-generate_opcode!(CONSTANT, CONSTANT_LONG, TRUE, FALSE, NUL, ADD, SUB, MUL, DIV, NEG, RETURN, EOF);
+generate_opcode!(
+    CONSTANT, CONSTANT_LONG,
+    TRUE, FALSE, NUL,
+    ADD, SUB, MUL, DIV, UMINUS,
+    EQUAL, LESS, GREATER, NOT,
+    
+    RETURN, EOF
+);
 
 
 struct LineEnocding {
