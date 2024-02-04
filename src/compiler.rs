@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError, debug::disassemble_chunk};
 
 pub struct Compiler<'a> {
     current: Token,
