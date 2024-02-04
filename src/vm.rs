@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, debug};
 
 
 pub enum VMError {
