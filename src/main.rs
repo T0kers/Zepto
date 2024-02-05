@@ -7,6 +7,7 @@ pub mod vm;
 pub mod interpreter;
 pub mod compiler;
 pub mod scanner;
+pub mod object;
 
 use vm::VMError;
 use value::Value;
@@ -14,8 +15,9 @@ use std::{env, fs, io::{self, Write}};
 
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
-    println!("i64::MAX: {}", i64::MAX);
     println!("Size of Value: {}", ::std::mem::size_of::<Value>());
+    println!("Size of Object: {}", ::std::mem::size_of::<object::Object>());
+    
     let args: Vec<String> = env::args().collect();
 
     match args.len() {

@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::Object};
 
 
 pub enum VMError {
@@ -7,10 +7,10 @@ pub enum VMError {
 }
 
 pub struct VM<'a> {
-    chunk: &'a Chunk,
+    chunk: &'a Chunk<'a>,
     ip: *const u8,
-    stack: [Value; 256],
-    stack_top: *mut Value,
+    stack: [Value<'a>; 256],
+    stack_top: *mut Value<'a>,
 }
 
 macro_rules! build_comparison_op {
@@ -25,8 +25,34 @@ macro_rules! build_comparison_op {
                 (Value::Bool(a), Value::Num(b)) => self.push(Value::Bool(Number::Int(a as i64) $oper b)),
                 (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
                 (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+                _ => return self.runtime_error("Unexpected operand type."),
             }
             Ok(())
+        }
+    };
+}
+
+macro_rules! build_int_op {
+    ($name:ident, $oper:tt) => {
+        pub unsafe fn $name(&mut self) -> Result<(), VMError> {
+            let b = self.pop();
+            let a = self.pop();
+            let result = match (a, b) {
+                (Value::Num(a), Value::Num(b)) => a $oper b,
+                (Value::Bool(a), Value::Bool(b)) => Number::Int(a as i64) $oper Number::Int(b as i64),
+                (Value::Num(a), Value::Bool(b)) => a $oper Number::Int(b as i64),
+                (Value::Bool(a), Value::Num(b)) => Number::Int(a as i64) $oper b,
+                (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
+                (_, Value::Nul) => return self.runtime_error("Right operand was nul."),
+                _ => return self.runtime_error("Unexpected operand types."),
+            };
+            if let Some(n) = result {
+                self.push(Value::Num(n));
+                Ok(())
+            }
+            else {
+                self.runtime_error("Calculation of remainder failed.")
+            }
         }
     };
 }
@@ -36,8 +62,12 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
+            (Value::Obj(a), Value::Obj(b)) => match (*a, *b) {
+                (Object::Str(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(a + &b)))),
+                _ => return self.runtime_error("Unexpected operand types."),
+            },
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a + b)),
-            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 + b as i64))),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) + Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a + Number::Int(b as i64))),
             (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) + b)),
             (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
@@ -51,7 +81,7 @@ impl<'a> VM<'a> {
         let a = self.pop();
         match (a, b) {
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a - b)),
-            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 - b as i64))),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) - Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a - Number::Int(b as i64))),
             (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) - b)),
             (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
@@ -64,8 +94,16 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
+            (Value::Obj(a), Value::Num(b)) => match (*a, b) {
+                (Object::Str(a), Number::Int(b)) => self.push(Value::Obj(Box::new(Object::Str(a.repeat(b as usize))))),
+                _ => return self.runtime_error("Unexpected operand types."),
+            }
+            (Value::Num(a), Value::Obj(b)) => match (a, *b) {
+                (Number::Int(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(b.repeat(a as usize))))),
+                _ => return self.runtime_error("Unexpected operand types."),
+            }
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a * b)),
-            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 * b as i64))),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) * Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a * Number::Int(b as i64))),
             (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) * b)),
             (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
@@ -79,7 +117,7 @@ impl<'a> VM<'a> {
         let a = self.pop();
         match (a, b) {
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a / b)),
-            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64 / b as i64))),
+            (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) / Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a / Number::Int(b as i64))),
             (Value::Bool(a), Value::Num(b)) => self.push(Value::Num(Number::Int(a as i64) / b)),
             (Value::Nul, _) => return self.runtime_error("Left operand was nul."),
@@ -88,6 +126,12 @@ impl<'a> VM<'a> {
         }
         Ok(())
     }
+    
+    build_int_op!(rem, %);
+    build_int_op!(bitor, |);
+    build_int_op!(bitxor, ^);
+    build_int_op!(bitand, &);
+
     pub unsafe fn neg(&mut self) -> Result<(), VMError> {
         match self.pop() {
             Value::Num(a) => self.push(Value::Num(-a)),
@@ -101,6 +145,7 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
+            (Value::Obj(a), Value::Obj(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Bool(a == b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a == Number::Int(b as i64))),
@@ -108,6 +153,7 @@ impl<'a> VM<'a> {
             (Value::Nul, Value::Nul) => self.push(Value::Bool(true)),
             (Value::Nul, _) => self.push(Value::Bool(false)),
             (_, Value::Nul) => self.push(Value::Bool(false)),
+            _ => return self.runtime_error("Unexpected operand type."),
         }
         Ok(())
     }
@@ -118,12 +164,13 @@ impl<'a> VM<'a> {
 impl<'a> VM<'a> {
     pub fn new(chunk: &'a Chunk) -> Self {
         let ip = chunk.code.as_ptr();
-        let mut stack = [Value::Nul; 256];
+        const ARRAY_REPEAT_VALUE: Value<'_> = Value::Nul;
+        let mut stack = [ARRAY_REPEAT_VALUE; 256];
         Self {
             chunk,
             ip,
-            stack,
             stack_top: stack.as_mut_ptr(),
+            stack,
         }
     }
     fn reset_stack(&mut self) {
@@ -146,7 +193,10 @@ impl<'a> VM<'a> {
                     print!("        [ ");
                     let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
                     for index in 0..stack_size {
-                        print!("{} ", self.stack[index]);
+                        print!("{} ", match &self.stack[index] {
+                            Value::Obj(o) => o.debug_string(),
+                            other => other.to_string(),
+                        });
                     }
                     println!("]");
                     debug::disassemble_instruction(&self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
@@ -155,13 +205,13 @@ impl<'a> VM<'a> {
                 match self.read_byte() {
                     OpCode::CONSTANT => {
                         let index = self.read_byte() as usize;
-                        let constant = self.chunk.constants[index];
+                        let constant = self.chunk.constants[index].clone();
                         self.push(constant);
                     }
                     OpCode::CONSTANT_LONG => {
                         let mut index = self.read_byte() as usize;
                         index = index << 8 | self.read_byte() as usize;
-                        let constant = self.chunk.constants[index];
+                        let constant = self.chunk.constants[index].clone();
                         self.push(constant);
                     }
                     OpCode::TRUE => self.push(Value::Bool(true)),
@@ -171,7 +221,11 @@ impl<'a> VM<'a> {
                     OpCode::SUB => self.sub()?,
                     OpCode::MUL => self.mul()?,
                     OpCode::DIV => self.div()?,
+                    OpCode::REM => self.rem()?,
                     OpCode::UMINUS => self.neg()?,
+                    OpCode::BITOR => self.bitor()?,
+                    OpCode::BITXOR => self.bitxor()?,
+                    OpCode::BITAND => self.bitand()?,
                     OpCode::EQUAL => self.equal()?,
                     OpCode::LESS => self.less()?,
                     OpCode::GREATER => self.greater()?,
@@ -190,16 +244,16 @@ impl<'a> VM<'a> {
         }
     }
 
-    unsafe fn push(&mut self, value: Value) {
+    unsafe fn push(&mut self, value: Value<'a>) {
         *self.stack_top = value;
         self.stack_top = self.stack_top.add(1);
     }
-    unsafe fn pop(&mut self) -> Value {
+    unsafe fn pop(&mut self) -> Value<'a> {
         self.stack_top = self.stack_top.sub(1);
-        *self.stack_top
+        (*self.stack_top).clone()
     }
     unsafe fn peek(&mut self, distance: usize) -> Value {
-        *self.stack_top.sub(1 + distance)
+        (*self.stack_top.sub(1 + distance)).clone()
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.

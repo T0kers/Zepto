@@ -4,7 +4,7 @@ pub enum TokenKind {
     LParen, RParen,
     LBracket, RBracket,
     LBrace, RBrace,
-    Plus, Minus, Slash, Tilde,
+    Plus, Minus, Slash, Rem, Tilde,
     Dot, Comma, Colon, Semicolon,
 
     // one or two characters
@@ -142,6 +142,7 @@ impl<'a> Scanner<'a> {
                 '+' => Token::new(TokenKind::Plus, self.start, self.current, self.line),
                 '-' => Token::new(TokenKind::Minus, self.start, self.current, self.line),
                 '/' => Token::new(TokenKind::Slash, self.start, self.current, self.line),
+                '%' => Token::new(TokenKind::Rem, self.start, self.current, self.line),
                 '~' => Token::new(TokenKind::Tilde, self.start, self.current, self.line),
                 '.' => Token::new(TokenKind::Dot, self.start, self.current, self.line),
                 ',' => Token::new(TokenKind::Comma, self.start, self.current, self.line),
@@ -205,7 +206,6 @@ impl<'a> Scanner<'a> {
                     }
                     Token::new_identifier(self.source, self.start, self.current, self.line)
                 }
-
                 _ => Token::error(String::from("bruh"), self.start, self.current, self.line),
             }
         }

@@ -1,12 +1,12 @@
 use std::io::{self, Write};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError, object::Object};
 
 pub struct Compiler<'a> {
     current: Token,
     previous: Token,
     scanner: Scanner<'a>,
-    pub chunk: Chunk,
+    pub chunk: Chunk<'a>,
     had_error: bool,
     panic_mode: bool,
 }
@@ -43,7 +43,7 @@ impl<'a> Compiler<'a> {
             Ok(())
         }
     }
-    fn current_chunk(&mut self) -> &mut Chunk {
+    fn current_chunk(&mut self) -> &mut Chunk<'a> {
         &mut self.chunk
     }
 }
@@ -61,7 +61,7 @@ pub enum Precedence {
     BitwiseXor,  // ^
     BitwiseAnd,  // &
     Term,        // + -
-    Factor,      // * /
+    Factor,      // * / %
     Unary,       // ! - ~
     Call,        // . ()
     Primary
@@ -153,24 +153,25 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(rule.precedence.one_higher());
         
         match oper_kind {
-            TokenKind::Plus => {self.emit_byte(OpCode::ADD)},
-            TokenKind::Minus => {self.emit_byte(OpCode::SUB)},
-            TokenKind::Star => {self.emit_byte(OpCode::MUL)},
-            TokenKind::Slash => {self.emit_byte(OpCode::DIV)},
+            TokenKind::Plus => self.emit_byte(OpCode::ADD),
+            TokenKind::Minus => self.emit_byte(OpCode::SUB),
+            TokenKind::Star => self.emit_byte(OpCode::MUL),
+            TokenKind::Slash => self.emit_byte(OpCode::DIV),
+            TokenKind::Rem => self.emit_byte(OpCode::REM),
             TokenKind::StarStar => {},
-            TokenKind::ExclamationEqual => {self.emit_bytes(OpCode::EQUAL, OpCode::NOT);}, // TODO: maybe create custom instruction
-            TokenKind::EqualEqual => {self.emit_byte(OpCode::EQUAL);},
-            TokenKind::Greater => {self.emit_byte(OpCode::GREATER);},
-            TokenKind::GreaterEqual => {self.emit_bytes(OpCode::LESS, OpCode::NOT);},  // TODO: maybe create custom instruction
+            TokenKind::ExclamationEqual => self.emit_bytes(OpCode::EQUAL, OpCode::NOT), // TODO: maybe create custom instruction
+            TokenKind::EqualEqual => self.emit_byte(OpCode::EQUAL),
+            TokenKind::Greater => self.emit_byte(OpCode::GREATER),
+            TokenKind::GreaterEqual => self.emit_bytes(OpCode::LESS, OpCode::NOT),  // TODO: maybe create custom instruction
             TokenKind::GreaterGreater => {},
-            TokenKind::Less => {self.emit_byte(OpCode::LESS);},
-            TokenKind::LessEqual => {self.emit_bytes(OpCode::GREATER, OpCode::NOT);},  // TODO: maybe create custom instruction
+            TokenKind::Less => self.emit_byte(OpCode::LESS),
+            TokenKind::LessEqual => self.emit_bytes(OpCode::GREATER, OpCode::NOT),  // TODO: maybe create custom instruction
             TokenKind::LessLess => {},
-            TokenKind::And => {},
+            TokenKind::And => self.emit_byte(OpCode::BITAND),
             TokenKind::AndAnd => {},
-            TokenKind::Bar => {},
+            TokenKind::Bar => self.emit_byte(OpCode::BITOR),
             TokenKind::BarBar => {},
-            TokenKind::Carrot => {},
+            TokenKind::Carrot => self.emit_byte(OpCode::BITXOR),
             TokenKind::CarrotCarrot => {},
             _ => unreachable!()
         }
@@ -208,7 +209,13 @@ impl<'a> Compiler<'a> {
             _ => unreachable!(),
         })
     }
-    fn emit_constant(&mut self, value: Value) {
+    fn emit_string(&mut self) {
+        self.emit_constant(Value::Obj(Box::new(Object::Str(
+            self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
+        ))));
+    }
+
+    fn emit_constant(&mut self, value: Value<'a>) {
         let prev_line = self.previous.line;
         if self.current_chunk().write_constant(value, prev_line).is_err() {
             self.error("Too many constants in one chunk.");
@@ -234,27 +241,37 @@ impl<'a> Compiler<'a> {
         use TokenKind as TK;
         static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s| s.grouping()), None, Precedence::None);
 
-        static EQUALITY_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Equality);
-        static COMPARISON_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Comparison);
+        static BITWISE_OR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseOr);
+        static BITWISE_XOR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseXor);
+        static BITWISE_AND_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseAnd);
 
         static PLUS_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Term);
         static MINUS_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), Some(|s| s.binary()), Precedence::Term);
         static UNARY_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), None, Precedence::None);
         static TERM_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Factor);
+
+        static EQUALITY_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Equality);
+        static COMPARISON_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Comparison);
+
         static NUMBER_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_number()), None, Precedence::None);
         static LITERAL_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_literal()), None, Precedence::None);
+        static STRING_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_string()), None, Precedence::None);
         static DEFAULT_RULE: ParseRule = ParseRule::new(None, None, Precedence::None);
 
         match kind {
             TK::LParen => &LPAREN_RULE,
+            TK::Bar => &BITWISE_OR_RULE,
+            TK::Carrot => &BITWISE_XOR_RULE,
+            TK::And => &BITWISE_AND_RULE,
             TK::Plus => &PLUS_RULE,
             TK::Minus => &MINUS_RULE,
             TK::Exclamation => &UNARY_RULE,
-            TK::Star | TK::Slash => &TERM_RULE,
-            TK::Int | TK::Float => &NUMBER_RULE,
-            TK::True | TK::False | TK::Nul => &LITERAL_RULE,
+            TK::Star | TK::Slash | TK::Rem => &TERM_RULE,
             TK::EqualEqual | TK::ExclamationEqual => &EQUALITY_RULE,
             TK::Greater | TK::GreaterEqual |TK::Less | TK::LessEqual => &COMPARISON_RULE,
+            TK::Int | TK::Float => &NUMBER_RULE,
+            TK::True | TK::False | TK::Nul => &LITERAL_RULE,
+            TK::String => &STRING_RULE,
             _ => &DEFAULT_RULE,
         }
     }

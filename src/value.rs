@@ -1,4 +1,5 @@
 use std::{fmt, ops, cmp::Ordering};
+use crate::object::Object;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Number {
@@ -64,13 +65,24 @@ impl ops::Div for Number {
     type Output = Number;
     fn div(self, other: Number) -> Number {
         match (self, other) {
-            (Number::Int(a), Number::Int(b)) => match a.checked_div(b) {
+            (Number::Int(a), Number::Int(b)) if a % b == 0 => match a.checked_div(b) {
                 Some(n) => Number::Int(n),
                 None => Number::Float(a as f64 / b as f64),
             },
+            (Number::Int(a), Number::Int(b)) => Number::Float(a as f64 / b as f64),
             (Number::Int(a), Number::Float(b)) => Number::Float(a as f64 / b),
             (Number::Float(a), Number::Int(b)) => Number::Float(a / b as f64),
             (Number::Float(a), Number::Float(b)) => Number::Float(a / b),
+        }
+    }
+}
+
+impl ops::Rem for Number {
+    type Output = Option<Number>;
+    fn rem(self, other: Number) -> Option<Number> {
+        match (self, other) {
+            (Number::Int(a), Number::Int(b)) => a.checked_rem(b).map(Number::Int),
+            _ => None,
         }
     }
 }
@@ -80,11 +92,32 @@ impl ops::Neg for Number {
 
     fn neg(self) -> Number {
         match self {
-            Number::Int(i) => Number::Int(-i),
+            Number::Int(a) => match a.checked_neg() {
+                Some(n) => Number::Int(n),
+                None => Number::Float(-(a as f64)),
+            },
             Number::Float(f) => Number::Float(-f),
         }
     }
 }
+
+macro_rules! build_bitwise_ops {
+    ($type:ident, $func:ident, $op:tt) => {
+        impl ops::$type for Number {
+            type Output = Option<Number>;
+            fn $func(self, other: Number) -> Option<Number> {
+                match (self, other) {
+                    (Number::Int(a), Number::Int(b)) => Some(Number::Int(a $op b)),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+build_bitwise_ops!(BitOr, bitor, |);
+build_bitwise_ops!(BitXor, bitxor, ^);
+build_bitwise_ops!(BitAnd, bitand, &);
 
 impl PartialEq for Number {
     fn eq(&self, other: &Self) -> bool {
@@ -125,16 +158,18 @@ impl fmt::Display for Number {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Value {
+#[derive(Clone)]
+pub enum Value<'a> {
+    Obj(Box<Object<'a>>),
     Num(Number),
     Bool(bool),
     Nul,
 }
 
-impl Value {
+impl<'a> Value<'a> {
     pub fn as_bool(&self) -> bool {
         match self {
+            Value::Obj(_) => true,
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,
             Value::Nul => false,
@@ -142,9 +177,10 @@ impl Value {
     }
 }
 
-impl fmt::Display for Value {
+impl<'a> fmt::Display for Value<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Value::Obj(o) => write!(f, "{}", o),
             Value::Num(i) => write!(f, "{}", i),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nul => write!(f, "nul"),

@@ -21,25 +21,25 @@ macro_rules! generate_opcode {
 generate_opcode!(
     CONSTANT, CONSTANT_LONG,
     TRUE, FALSE, NUL,
-    ADD, SUB, MUL, DIV, UMINUS,
+    ADD, SUB, MUL, DIV, REM, UMINUS,
+    BITOR, BITXOR, BITAND,
     EQUAL, LESS, GREATER, NOT,
     
     RETURN, EOF
 );
-
 
 struct LineEnocding {
     amount: u32,
     line: u32,
 }
 
-pub struct Chunk {
+pub struct Chunk<'a> {
     pub code: Vec<u8>,
-    pub constants: Vec<Value>,
+    pub constants: Vec<Value<'a>>,
     lines: Vec<LineEnocding>,
 }
 
-impl Chunk {
+impl<'a> Chunk<'a> {
     pub fn new() -> Self {
         Self {
             code: vec![],
@@ -51,11 +51,11 @@ impl Chunk {
         self.code.push(opcode);
         self.add_line(line);
     }
-    pub fn add_constant(&mut self, value: Value) -> Result<u16, TryFromIntError> {
+    pub fn add_constant(&mut self, value: Value<'a>) -> Result<u16, TryFromIntError> {
         self.constants.push(value);
         (self.constants.len() - 1).try_into()
     }
-    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), TryFromIntError> {
+    pub fn write_constant(&mut self, value: Value<'a>, line: u32) -> Result<(), TryFromIntError> {
         let index: u16 = self.add_constant(value)?;
         if index > (u8::MAX as u16) {
             self.add_opcode(OpCode::CONSTANT_LONG, line);
@@ -94,7 +94,7 @@ impl Chunk {
     } 
 }
 
-impl Default for Chunk {
+impl<'a> Default for Chunk<'a> {
     fn default() -> Self {
         Chunk::new()
     }
