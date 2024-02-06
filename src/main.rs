@@ -17,6 +17,7 @@ fn main() {
     env::set_var("RUST_BACKTRACE", "1");
     println!("Size of Value: {}", ::std::mem::size_of::<Value>());
     println!("Size of Object: {}", ::std::mem::size_of::<object::Object>());
+    println!("Size of Option value: {}", ::std::mem::size_of::<Option<Value>>());
     
     let args: Vec<String> = env::args().collect();
 

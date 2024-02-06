@@ -11,6 +11,7 @@ pub struct VM<'a> {
     ip: *const u8,
     stack: [Value<'a>; 256],
     stack_top: *mut Value<'a>,
+    globals: Box<[Option<Value<'a>>]>
 }
 
 macro_rules! build_comparison_op {
@@ -162,7 +163,7 @@ impl<'a> VM<'a> {
 }
 
 impl<'a> VM<'a> {
-    pub fn new(chunk: &'a Chunk) -> Self {
+    pub fn new(chunk: &'a Chunk, global_count: u16) -> Self {
         let ip = chunk.code.as_ptr();
         const ARRAY_REPEAT_VALUE: Value<'_> = Value::Nul;
         let mut stack = [ARRAY_REPEAT_VALUE; 256];
@@ -171,6 +172,7 @@ impl<'a> VM<'a> {
             ip,
             stack_top: stack.as_mut_ptr(),
             stack,
+            globals: vec![None; global_count as usize].into_boxed_slice(),
         }
     }
     fn reset_stack(&mut self) {
@@ -233,7 +235,57 @@ impl<'a> VM<'a> {
                         let result = !self.pop().as_bool();
                         self.push(Value::Bool(result));
                     }
-                    
+                    OpCode::DEFINE_GLOBAL => {
+                        let index = self.read_byte() as usize;
+                        self.globals[index] = Some(self.pop()); // TODO: MAYBE change this because of garbage collection.
+                    }
+                    OpCode::DEFINE_GLOBAL_LONG => {
+                        let mut index = self.read_byte() as usize;
+                        index = index << 8 | self.read_byte() as usize;
+                        self.globals[index] = Some(self.pop()); // TODO: MAYBE change this because of garbage collection.
+                    },
+                    OpCode::SET_GLOBAL => {
+                        let index = self.read_byte() as usize;
+                        match self.globals[index] {
+                            Some(_) => {
+                                self.globals[index] = Some(self.peek(0)); // TODO: MAYBE change this because of garbage collection.
+                            }
+                            None => {
+                                self.runtime_error("Cannot assign to undefined variable.")?; // TODO: show variable name in message.
+                            }
+                        }
+                    }
+                    OpCode::SET_GLOBAL_LONG => {
+                        let mut index = self.read_byte() as usize;
+                        index = index << 8 | self.read_byte() as usize;
+                        match self.globals[index] {
+                            Some(_) => {
+                                self.globals[index] = Some(self.peek(0)); // TODO: MAYBE change this because of garbage collection.
+                            }
+                            None => {
+                                self.runtime_error("Cannot assign to undefined variable.")?; // TODO: show variable name in message.
+                            }
+                        }
+                    }
+                    OpCode::GET_GLOBAL => {
+                        let index = self.read_byte() as usize;
+                        if let Some(value) = &self.globals[index] {
+                            self.push(value.clone());
+                        } else {
+                            self.runtime_error("Undefined variable.")? // TODO: show variable name in message.
+                        }
+                    }
+                    OpCode::GET_GLOBAL_LONG => {
+                        let mut index = self.read_byte() as usize;
+                        index = index << 8 | self.read_byte() as usize;
+                        if let Some(value) = &self.globals[index] {
+                            self.push(value.clone());
+                        } else {
+                            self.runtime_error("Undefined variable.")? // TODO: show variable name in message.
+                        }
+                    }
+                    OpCode::PRINT => {println!("{}", self.pop())},
+                    OpCode::POP => {self.pop();},
                     OpCode::RETURN => {println!("Returned: {}", self.pop())},
                     OpCode::EOF => return Ok(()),
                     _ => {
@@ -252,7 +304,7 @@ impl<'a> VM<'a> {
         self.stack_top = self.stack_top.sub(1);
         (*self.stack_top).clone()
     }
-    unsafe fn peek(&mut self, distance: usize) -> Value {
+    unsafe fn peek(&mut self, distance: usize) -> Value<'a> {
         (*self.stack_top.sub(1 + distance)).clone()
     }
 

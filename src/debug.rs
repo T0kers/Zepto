@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, object::Object, value::Value};
+use crate::{chunk::{Chunk, OpCode}, value::Value};
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("==== {} ====", name);
@@ -37,12 +37,32 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         // OpCode::BITSHR => simple_instruction("BITSHR", i),
         OpCode::EQUAL => simple_instruction("EQUAL", i),
         OpCode::LESS => simple_instruction("LESS", i),
+        OpCode::DEFINE_GLOBAL => variable_instruction("DEFINE_GLOBAL", chunk, i),
+        OpCode::DEFINE_GLOBAL_LONG => variable_instruction_long("DEFINE_GLOBAL_LONG", chunk, i),
+        OpCode::SET_GLOBAL => variable_instruction("SET_GLOBAL", chunk, i),
+        OpCode::SET_GLOBAL_LONG => variable_instruction_long("SET_GLOBAL_LONG", chunk, i),
+        OpCode::GET_GLOBAL => variable_instruction("GET_GLOBAL", chunk, i),
+        OpCode::GET_GLOBAL_LONG => variable_instruction_long("GET_GLOBAL_LONG", chunk, i),
         OpCode::GREATER => simple_instruction("GREATER", i),
         OpCode::NOT => simple_instruction("NOT", i),
+        OpCode::PRINT => simple_instruction("PRINT", i),
+        OpCode::POP => simple_instruction("POP", i),
         OpCode::RETURN => simple_instruction("RETURN", i),
         OpCode::EOF => simple_instruction("EOF", i),
         _ => {println!("????"); i + 1},
     }
+}
+
+fn variable_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {
+    let index = chunk.code[i + 1] as usize;
+    println!("{} {}", name, index);
+    i + 2
+}
+
+fn variable_instruction_long(name: &str, chunk: &Chunk, i: usize) -> usize {
+    let index: usize = ((chunk.code[i + 1] as usize) << 8) | (chunk.code[i + 2] as usize);
+    println!("{} {}", name, index);
+    i + 3
 }
 
 fn constant_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {

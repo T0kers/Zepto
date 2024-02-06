@@ -22,7 +22,7 @@ pub enum TokenKind {
 
     // keywords
     If, Else, For, While,
-	Set, Fn, Class, Selv,
+	Let, Fn, Class, Selv,
 	Print, Return,
 	True, False,
 	Nul,
@@ -64,14 +64,8 @@ impl Token {
                     _ => TokenKind::Identifier,
                 }
                 'w' => Token::check_keyword(chars.as_str(), "hile", TokenKind::While),
-                's' => match chars.nth(0) {
-                    Some('e') => match chars.nth(0) {
-                        Some('t') => Token::check_keyword(chars.as_str(), "", TokenKind::Set),
-                        Some('l') => Token::check_keyword(chars.as_str(), "f", TokenKind::Selv),
-                        _ => TokenKind::Identifier,
-                    }
-                    _ => TokenKind::Identifier,
-                }
+                's' => Token::check_keyword(chars.as_str(), "elv", TokenKind::Selv),
+                'l' => Token::check_keyword(chars.as_str(), "et", TokenKind::Let),
                 'p' => Token::check_keyword(chars.as_str(), "rint", TokenKind::Print),
                 'r' => Token::check_keyword(chars.as_str(), "eturn", TokenKind::Return),
                 't' => Token::check_keyword(chars.as_str(), "rue", TokenKind::True),

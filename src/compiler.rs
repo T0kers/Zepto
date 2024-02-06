@@ -1,12 +1,47 @@
-use std::io::{self, Write};
+use std::{io::{self, Write}, collections::HashMap};
 
 use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError, object::Object};
+
+pub struct Globals {
+    global_ids: HashMap<String, u16>,
+    pub next_id: u16,
+}
+
+impl Globals {
+    pub fn new() -> Self {
+        Self {
+            global_ids: HashMap::new(),
+            next_id: 0,
+        }
+    }
+    pub fn create_or_get_id(&mut self, name: &str) -> u16 {
+        if let Some(id) = self.global_ids.get(name) {
+            *id
+        }
+        else {
+            let id = self.next_id;
+            self.global_ids.insert(name.to_string(), id);
+            self.next_id += 1;
+            id
+        }
+    }
+    pub fn find_id(&self, name: &str) -> Option<u16> {
+        self.global_ids.get(name).cloned()
+    }
+}
+
+impl Default for Globals {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub struct Compiler<'a> {
     current: Token,
     previous: Token,
     scanner: Scanner<'a>,
     pub chunk: Chunk<'a>,
+    pub globals: Globals,
     had_error: bool,
     panic_mode: bool,
 }
@@ -18,6 +53,7 @@ impl<'a> Compiler<'a> {
             previous: Token::new(TokenKind::Nul, 0, 0, 0),
             scanner: Scanner::new(source),
             chunk: Chunk::new(),
+            globals: Globals::new(),
             had_error: false,
             panic_mode: false,
         }
@@ -25,10 +61,11 @@ impl<'a> Compiler<'a> {
     pub fn compile(&mut self) -> Result<(), VMError> {
         self.advance();
         
-        self.expression();
+        while !self.compare(TokenKind::EOF) {
+            self.statement();
+        }
 
-        self.consume(TokenKind::EOF, "Expected end of expression.");
-        self.emit_byte(OpCode::RETURN);
+        self.consume(TokenKind::EOF, "Expected end of tokens.");
         self.emit_byte(OpCode::EOF);
 
         if self.had_error {
@@ -110,26 +147,86 @@ impl<'a> Compiler<'a> {
             self.error_at_current(msg);
         }
     }
+    fn compare(&mut self, kind: TokenKind) -> bool {
+        if self.check(kind) {
+            self.advance();
+            true
+        }
+        else {
+            false
+        }
+    }
+    fn check(&mut self, kind: TokenKind) -> bool {
+        self.current.kind == kind
+    }
 
     fn parse_precedence(&mut self, prec: Precedence) {
         self.advance();
+
+        let can_assign = prec <= Precedence::Assignment;
         if let Some(prefix_rule) = self.get_rule(&self.previous.kind).prefix {
-            prefix_rule(self);
+            prefix_rule(self, can_assign);
         }
         else {
             self.error("Expected expression.");
             return;
         }
-
         while prec <= self.get_rule(&self.current.kind).precedence {
             self.advance();
             if let Some(infix_rule) = self.get_rule(&self.previous.kind).infix {
                 infix_rule(self);
             }
-
+        }
+        if can_assign && self.compare(TokenKind::Equal) {
+            self.error("Invalid assignment target.");
         }
     }
+    fn statement(&mut self) {
+        match self.current.kind.clone() {
+            TokenKind::Print => self.print_statement(),
+            TokenKind::Let => self.let_statement(),
+            // TokenKind::Fn => self.fn_statement(),
+            // TokenKind::Return => self.return_statement(),
+            // TokenKind::If => self.if_statement(),
+            // TokenKind::While => self.while_statement(),
+            // TokenKind::For => self.for_statement(),
+            // TokenKind::Break => self.break_statement(),
+            // TokenKind::Continue => self.continue_statement(),
+            _ => self.expression_statement(),
+        }
 
+        if self.panic_mode {
+            self.syncronize();
+        }
+    }
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenKind::Semicolon, "Expected ';' after expression.");
+        self.emit_byte(OpCode::POP);
+    }
+    fn print_statement(&mut self) {
+        self.advance();
+        self.expression();
+        self.consume(TokenKind::Semicolon, "Expected ';' at end of printing value.");
+        self.emit_byte(OpCode::PRINT);
+    }
+    fn let_statement(&mut self) {
+        self.advance();
+        let id = self.parse_global_variable("Expected variable name.");
+        if self.compare(TokenKind::Equal) {
+            self.expression()
+        }
+        else {
+            self.emit_byte(OpCode::NUL);
+        }
+        self.consume(TokenKind::Semicolon, "Expected ';' after variable declaration.");
+        self.emit_global_definition(id);
+
+    }
+    pub fn parse_global_variable(&mut self, msg: &str) -> u16 {
+        self.consume(TokenKind::Identifier, msg);
+        self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source))
+    }
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment);
     }
@@ -214,6 +311,34 @@ impl<'a> Compiler<'a> {
             self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
         ))));
     }
+    fn emit_global_definition(&mut self, id: u16) {
+        if id > (u8::MAX as u16) {
+            self.emit_byte(OpCode::DEFINE_GLOBAL_LONG);
+            self.emit_bytes((id >> 8) as u8, (id & 0xFF) as u8);
+        }
+        else {
+            self.emit_bytes(OpCode::DEFINE_GLOBAL, id as u8);
+        }
+    }
+    fn emit_variable(&mut self, can_assign: bool) {
+        let id = self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source));
+
+        let (instruction, instruction_long) = if can_assign && self.compare(TokenKind::Equal) {
+            self.expression();
+            (OpCode::SET_GLOBAL, OpCode::SET_GLOBAL_LONG)
+        }
+        else {
+            (OpCode::GET_GLOBAL, OpCode::GET_GLOBAL_LONG)
+        };
+
+        if id > (u8::MAX as u16) {
+            self.emit_byte(instruction_long);
+            self.emit_bytes((id >> 8) as u8, (id & 0xFF) as u8);
+        }
+        else {
+            self.emit_bytes(instruction, id as u8);
+        }
+    }
 
     fn emit_constant(&mut self, value: Value<'a>) {
         let prev_line = self.previous.line;
@@ -225,13 +350,13 @@ impl<'a> Compiler<'a> {
 
 
 struct ParseRule {
-    prefix: Option<fn(&mut Compiler)>,
+    prefix: Option<fn(&mut Compiler, bool)>,
     infix: Option<fn(&mut Compiler)>,
     precedence: Precedence,
 }
 
 impl ParseRule {
-    pub const fn new(prefix: Option<fn(&mut Compiler)>, infix: Option<fn(&mut Compiler)>, precedence: Precedence) -> Self {
+    pub const fn new(prefix: Option<fn(&mut Compiler, bool)>, infix: Option<fn(&mut Compiler)>, precedence: Precedence) -> Self {
         Self {prefix, infix, precedence}
     } 
 }
@@ -239,23 +364,24 @@ impl ParseRule {
 impl<'a> Compiler<'a> {
     fn get_rule(&self, kind: &TokenKind) -> &'static ParseRule {
         use TokenKind as TK;
-        static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s| s.grouping()), None, Precedence::None);
+        static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s, _| s.grouping()), None, Precedence::None);
 
         static BITWISE_OR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseOr);
         static BITWISE_XOR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseXor);
         static BITWISE_AND_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseAnd);
 
         static PLUS_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Term);
-        static MINUS_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), Some(|s| s.binary()), Precedence::Term);
-        static UNARY_RULE: ParseRule = ParseRule::new(Some(|s| s.unary()), None, Precedence::None);
+        static MINUS_RULE: ParseRule = ParseRule::new(Some(|s, _| s.unary()), Some(|s| s.binary()), Precedence::Term);
+        static UNARY_RULE: ParseRule = ParseRule::new(Some(|s, _| s.unary()), None, Precedence::None);
         static TERM_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Factor);
 
         static EQUALITY_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Equality);
         static COMPARISON_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::Comparison);
 
-        static NUMBER_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_number()), None, Precedence::None);
-        static LITERAL_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_literal()), None, Precedence::None);
-        static STRING_RULE: ParseRule = ParseRule::new(Some(|s| s.emit_string()), None, Precedence::None);
+        static NUMBER_RULE: ParseRule = ParseRule::new(Some(|s, _| s.emit_number()), None, Precedence::None);
+        static LITERAL_RULE: ParseRule = ParseRule::new(Some(|s, _| s.emit_literal()), None, Precedence::None);
+        static STRING_RULE: ParseRule = ParseRule::new(Some(|s, _| s.emit_string()), None, Precedence::None);
+        static VARIABLE_RULE: ParseRule = ParseRule::new(Some(|s, b| s.emit_variable(b)), None, Precedence::None);
         static DEFAULT_RULE: ParseRule = ParseRule::new(None, None, Precedence::None);
 
         match kind {
@@ -272,6 +398,7 @@ impl<'a> Compiler<'a> {
             TK::Int | TK::Float => &NUMBER_RULE,
             TK::True | TK::False | TK::Nul => &LITERAL_RULE,
             TK::String => &STRING_RULE,
+            TK::Identifier => &VARIABLE_RULE,
             _ => &DEFAULT_RULE,
         }
     }
@@ -296,6 +423,18 @@ impl<'a> Compiler<'a> {
         }
         eprintln!(": {}", msg);
         self.had_error = true;
+    }
+
+    fn syncronize(&mut self) {
+        self.panic_mode = false;
+        while self.current.kind != TokenKind::EOF {
+            if self.previous.kind != TokenKind::Semicolon {return;}
+            match self.current.kind {
+                TokenKind::Print | TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords maybe.
+                _ => {}
+            }
+            self.advance();
+        }
     }
 }
 
