@@ -47,6 +47,7 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         OpCode::NOT => simple_instruction("NOT", i),
         OpCode::PRINT => simple_instruction("PRINT", i),
         OpCode::POP => simple_instruction("POP", i),
+        OpCode::POP_SCOPE => variable_instruction("POP_SCOPE", chunk, i),
         OpCode::RETURN => simple_instruction("RETURN", i),
         OpCode::EOF => simple_instruction("EOF", i),
         _ => {println!("????"); i + 1},

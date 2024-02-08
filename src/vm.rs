@@ -284,8 +284,11 @@ impl<'a> VM<'a> {
                             self.runtime_error("Undefined variable.")? // TODO: show variable name in message.
                         }
                     }
-                    OpCode::PRINT => {println!("{}", self.pop())},
+                    OpCode::PRINT => println!("{}", self.pop()),
                     OpCode::POP => {self.pop();},
+                    OpCode::POP_SCOPE => for _ in 0..self.read_byte() {
+                        self.pop();
+                    },
                     OpCode::RETURN => {println!("Returned: {}", self.pop())},
                     OpCode::EOF => return Ok(()),
                     _ => {

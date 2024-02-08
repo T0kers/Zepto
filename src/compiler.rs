@@ -1,6 +1,6 @@
-use std::{io::{self, Write}, collections::HashMap};
+use std::{collections::HashMap, io::{self, Write}, thread::Scope};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Value, Number}, vm::VMError, object::Object};
+use crate::{chunk::{Chunk, OpCode}, object::Object, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::{VMError, VM}};
 
 pub struct Globals {
     global_ids: HashMap<String, u16>,
@@ -25,12 +25,89 @@ impl Globals {
             id
         }
     }
-    pub fn find_id(&self, name: &str) -> Option<u16> {
+    pub fn get_id(&self, name: &str) -> Option<u16> {
         self.global_ids.get(name).cloned()
     }
 }
 
 impl Default for Globals {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct ScopeInfo {
+    next_index: u8,
+    indexes: HashMap<String, u8>,
+}
+
+impl ScopeInfo {
+    pub fn new() -> Self {
+        Self {
+            next_index: 0,
+            indexes: HashMap::new(),
+        }
+    }
+}
+
+pub enum LocalError {
+    Overflow,
+    DuplicateName,
+}
+
+pub struct Locals {
+    info: Vec<ScopeInfo>,
+}
+
+impl Locals {
+    pub fn new() -> Self {
+        Self {
+            info: vec![],
+        }
+    }
+    pub fn begin_scope(&mut self) {
+        self.info.push(ScopeInfo::new());
+    }
+    pub fn end_scope(&mut self) -> u8 {
+        self.info.pop().unwrap().next_index
+    }
+    pub fn register_local(&mut self, name: &str) -> Result<(), LocalError> {
+        let current_scope = self.info.last_mut().unwrap();
+        if current_scope.indexes.get(name).is_some() {
+            return Err(LocalError::DuplicateName);
+        }
+
+        current_scope.indexes.insert(name.to_string(), current_scope.next_index);
+        if current_scope.next_index < u8::MAX {
+            current_scope.next_index += 1;
+        }
+        else {
+            return Err(LocalError::Overflow);
+        }
+        if self.local_overflow() { // IMPORTANT TODO: also check if there is space for tempoaries.
+            return Err(LocalError::Overflow);
+        }
+        Ok(())
+    }
+    pub fn get_index(&self, name: &str) -> Option<u8> {
+        for i in 0..self.depth() {
+            let check_scope = &self.info[self.depth() - i];
+            if let Some(index) = check_scope.indexes.get(name) {
+                return Some(*index);
+            }
+        }
+        None
+    }
+    fn local_overflow(&self) -> bool {
+        self.info.iter().map(|i| i.next_index as u16).sum::<u16>() > u8::MAX as u16
+    }
+
+    pub fn depth(&self) -> usize {
+        self.info.len()
+    }
+}
+
+impl Default for Locals {
     fn default() -> Self {
         Self::new()
     }
@@ -42,6 +119,7 @@ pub struct Compiler<'a> {
     scanner: Scanner<'a>,
     pub chunk: Chunk<'a>,
     pub globals: Globals,
+    locals: Locals,
     had_error: bool,
     panic_mode: bool,
 }
@@ -54,6 +132,7 @@ impl<'a> Compiler<'a> {
             scanner: Scanner::new(source),
             chunk: Chunk::new(),
             globals: Globals::new(),
+            locals: Locals::new(),
             had_error: false,
             panic_mode: false,
         }
@@ -185,6 +264,11 @@ impl<'a> Compiler<'a> {
         match self.current.kind.clone() {
             TokenKind::Print => self.print_statement(),
             TokenKind::Let => self.let_statement(),
+            TokenKind::LBrace => {
+                self.begin_scope();
+                self.block(false);
+                self.end_scope();
+            },
             // TokenKind::Fn => self.fn_statement(),
             // TokenKind::Return => self.return_statement(),
             // TokenKind::If => self.if_statement(),
@@ -207,12 +291,12 @@ impl<'a> Compiler<'a> {
     fn print_statement(&mut self) {
         self.advance();
         self.expression();
-        self.consume(TokenKind::Semicolon, "Expected ';' at end of printing value.");
+        self.consume(TokenKind::Semicolon, "Expected ';' at end of print statement.");
         self.emit_byte(OpCode::PRINT);
     }
     fn let_statement(&mut self) {
         self.advance();
-        let id = self.parse_global_variable("Expected variable name.");
+        let id = self.parse_variable("Expected variable name.");
         if self.compare(TokenKind::Equal) {
             self.expression()
         }
@@ -220,12 +304,46 @@ impl<'a> Compiler<'a> {
             self.emit_byte(OpCode::NUL);
         }
         self.consume(TokenKind::Semicolon, "Expected ';' after variable declaration.");
-        self.emit_global_definition(id);
+        self.emit_define_variable(id);
 
     }
-    pub fn parse_global_variable(&mut self, msg: &str) -> u16 {
+    fn begin_scope(&mut self) {
+        self.locals.begin_scope();
+    }
+    fn block(&mut self, is_expr: bool) {
+        self.advance();
+        while !self.check(TokenKind::RBrace) && !self.check(TokenKind::EOF) {
+            self.statement();
+        }
+        if is_expr {
+            todo!();
+        }
+        self.consume(TokenKind::RBrace, "Expected '}' after block.");
+    }
+    fn end_scope(&mut self) {
+        let amount = self.locals.end_scope();
+        self.emit_bytes(OpCode::POP_SCOPE, amount);
+    }
+    pub fn parse_variable(&mut self, msg: &str) -> u16 {
         self.consume(TokenKind::Identifier, msg);
+
+        self.declare_variable();
+        if self.locals.depth() > 0 {
+            return 0;
+        }
         self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source))
+    }
+    fn declare_variable(&mut self) {
+        if self.locals.depth() == 0 {
+            return;
+        }
+        if let Err(e) = self.locals.register_local(self.previous.lexeme(self.scanner.source)) {
+            match e {
+                LocalError::Overflow => self.error("Too many local variables declared."),
+                LocalError::DuplicateName => self.error("A variable with the same name already exists."),
+            }
+        }
+        
     }
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment);
@@ -311,7 +429,10 @@ impl<'a> Compiler<'a> {
             self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
         ))));
     }
-    fn emit_global_definition(&mut self, id: u16) {
+    fn emit_define_variable(&mut self, id: u16) {
+        if self.locals.depth() > 0 {
+            return;
+        }
         if id > (u8::MAX as u16) {
             self.emit_byte(OpCode::DEFINE_GLOBAL_LONG);
             self.emit_bytes((id >> 8) as u8, (id & 0xFF) as u8);

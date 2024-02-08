@@ -1,8 +1,0 @@
-
-let a;
-let b;
-a = b = 2;
-
-let x = 2;
-x = a * 3;
-print x;
