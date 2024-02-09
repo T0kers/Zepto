@@ -442,7 +442,18 @@ impl<'a> Compiler<'a> {
         }
     }
     fn emit_variable(&mut self, can_assign: bool) {
-        let id = self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source));
+        let lexeme = self.previous.lexeme(self.scanner.source);
+        if let Some(index) = self.locals.get_index(lexeme) {
+            if can_assign && self.compare(TokenKind::Equal) {
+                self.expression();
+                self.emit_bytes(OpCode::SET_LOCAL, index);
+            }
+            else {
+                self.emit_bytes(OpCode::GET_LOCAL, index);
+            }
+            return;
+        }
+        let id = self.globals.create_or_get_id(lexeme);
 
         let (instruction, instruction_long) = if can_assign && self.compare(TokenKind::Equal) {
             self.expression();
