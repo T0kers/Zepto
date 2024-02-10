@@ -20,7 +20,7 @@ macro_rules! generate_opcode {
 
 generate_opcode!(
     CONSTANT, CONSTANT_LONG,
-    TRUE, FALSE, NUL,
+    TRUE, FALSE, BOOL, NUL,
     ADD, SUB, MUL, DIV, REM, UMINUS,
     BITOR, BITXOR, BITAND,
     EQUAL, LESS, GREATER, NOT,
@@ -29,6 +29,9 @@ generate_opcode!(
     SET_GLOBAL, SET_GLOBAL_LONG, SET_LOCAL,
     GET_GLOBAL, GET_GLOBAL_LONG, GET_LOCAL,
     PRINT, POP, POP_SCOPE,
+
+    JUMP, JUMP_IF_TRUE, JUMP_IF_FALSE, POP_JUMP_IF_TRUE, POP_JUMP_IF_FALSE,
+    LOOP,
     RETURN, EOF
 );
 

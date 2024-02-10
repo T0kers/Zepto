@@ -1,6 +1,6 @@
-use std::{collections::HashMap, io::{self, Write}, thread::Scope};
+use std::{collections::HashMap, io::{self, Write}};
 
-use crate::{chunk::{Chunk, OpCode}, object::Object, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::{VMError, VM}};
+use crate::{chunk::{Chunk, OpCode}, object::Object, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError};
 
 pub struct Globals {
     global_ids: HashMap<String, u16>,
@@ -37,15 +37,17 @@ impl Default for Globals {
 }
 
 struct ScopeInfo {
-    next_index: u8,
+    count: u8,
     indexes: HashMap<String, u8>,
+    not_initialized: String,
 }
 
 impl ScopeInfo {
     pub fn new() -> Self {
         Self {
-            next_index: 0,
+            count: 0,
             indexes: HashMap::new(),
+            not_initialized: String::new(),
         }
     }
 }
@@ -56,12 +58,14 @@ pub enum LocalError {
 }
 
 pub struct Locals {
+    next_index: u8,
     info: Vec<ScopeInfo>,
 }
 
 impl Locals {
     pub fn new() -> Self {
         Self {
+            next_index: 0,
             info: vec![],
         }
     }
@@ -69,37 +73,38 @@ impl Locals {
         self.info.push(ScopeInfo::new());
     }
     pub fn end_scope(&mut self) -> u8 {
-        self.info.pop().unwrap().next_index
+        let count = self.info.pop().unwrap().count;
+        self.next_index -= count;
+        count
     }
     pub fn register_local(&mut self, name: &str) -> Result<(), LocalError> {
         let current_scope = self.info.last_mut().unwrap();
         if current_scope.indexes.get(name).is_some() {
             return Err(LocalError::DuplicateName);
         }
-
-        current_scope.indexes.insert(name.to_string(), current_scope.next_index);
-        if current_scope.next_index < u8::MAX {
-            current_scope.next_index += 1;
+        current_scope.not_initialized = name.to_string();
+        if self.next_index < u8::MAX { // IMPORTANT TODO: also check if there is space for tempoaries.
+            current_scope.count += 1;
+            self.next_index += 1;
         }
         else {
             return Err(LocalError::Overflow);
         }
-        if self.local_overflow() { // IMPORTANT TODO: also check if there is space for tempoaries.
-            return Err(LocalError::Overflow);
-        }
         Ok(())
     }
+    pub fn mark_as_initialized(&mut self) {
+        let current_scope = self.info.last_mut().unwrap();
+        let not_initialized = std::mem::take(&mut current_scope.not_initialized);
+        current_scope.indexes.insert(not_initialized, self.next_index - 1);
+    }
     pub fn get_index(&self, name: &str) -> Option<u8> {
-        for i in 0..self.depth() {
+        for i in 1..(self.depth() + 1) {
             let check_scope = &self.info[self.depth() - i];
             if let Some(index) = check_scope.indexes.get(name) {
                 return Some(*index);
             }
         }
         None
-    }
-    fn local_overflow(&self) -> bool {
-        self.info.iter().map(|i| i.next_index as u16).sum::<u16>() > u8::MAX as u16
     }
 
     pub fn depth(&self) -> usize {
@@ -159,7 +164,10 @@ impl<'a> Compiler<'a> {
             Ok(())
         }
     }
-    fn current_chunk(&mut self) -> &mut Chunk<'a> {
+    fn current_chunk(&self) -> &Chunk<'a> {
+        &self.chunk
+    }
+    fn current_chunk_mut(&mut self) -> &mut Chunk<'a> {
         &mut self.chunk
     }
 }
@@ -262,18 +270,14 @@ impl<'a> Compiler<'a> {
     }
     fn statement(&mut self) {
         match self.current.kind.clone() {
-            TokenKind::Print => self.print_statement(),
-            TokenKind::Let => self.let_statement(),
-            TokenKind::LBrace => {
-                self.begin_scope();
-                self.block(false);
-                self.end_scope();
-            },
+            TokenKind::Print => {self.advance(); self.print_statement()},
+            TokenKind::Let => {self.advance(); self.let_statement()},
+            TokenKind::LBrace => {self.advance(); self.block(false)},
+            TokenKind::If => {self.advance(); self.if_statement(false)},
+            TokenKind::While => {self.advance(); self.while_statement()},
+            TokenKind::For => {self.advance(); self.for_statement()},
             // TokenKind::Fn => self.fn_statement(),
             // TokenKind::Return => self.return_statement(),
-            // TokenKind::If => self.if_statement(),
-            // TokenKind::While => self.while_statement(),
-            // TokenKind::For => self.for_statement(),
             // TokenKind::Break => self.break_statement(),
             // TokenKind::Continue => self.continue_statement(),
             _ => self.expression_statement(),
@@ -289,13 +293,11 @@ impl<'a> Compiler<'a> {
         self.emit_byte(OpCode::POP);
     }
     fn print_statement(&mut self) {
-        self.advance();
         self.expression();
         self.consume(TokenKind::Semicolon, "Expected ';' at end of print statement.");
         self.emit_byte(OpCode::PRINT);
     }
     fn let_statement(&mut self) {
-        self.advance();
         let id = self.parse_variable("Expected variable name.");
         if self.compare(TokenKind::Equal) {
             self.expression()
@@ -311,7 +313,7 @@ impl<'a> Compiler<'a> {
         self.locals.begin_scope();
     }
     fn block(&mut self, is_expr: bool) {
-        self.advance();
+        self.begin_scope();
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::EOF) {
             self.statement();
         }
@@ -319,10 +321,87 @@ impl<'a> Compiler<'a> {
             todo!();
         }
         self.consume(TokenKind::RBrace, "Expected '}' after block.");
+        self.end_scope();
     }
     fn end_scope(&mut self) {
         let amount = self.locals.end_scope();
-        self.emit_bytes(OpCode::POP_SCOPE, amount);
+        if amount > 0 {
+            self.emit_bytes(OpCode::POP_SCOPE, amount);
+        }
+    }
+    fn if_statement(&mut self, is_expr: bool) {
+        self.expression();
+        self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
+        let then_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
+        self.block(is_expr);
+
+        if self.compare(TokenKind::Else) {
+            self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
+            let else_jump = self.emit_jump(OpCode::JUMP);
+
+            self.patch_jump(then_jump);
+
+            self.block(is_expr);
+            self.patch_jump(else_jump);
+        }
+        else {
+            self.patch_jump(then_jump);
+        }
+    }
+    fn while_statement(&mut self) {
+        let loop_start = self.current_chunk().code.len();
+        self.expression();
+        let exit_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
+
+        self.consume(TokenKind::LBrace, "Expected '{' after while statement.");
+        self.block(false);
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+    }
+    fn for_statement(&mut self) {
+        self.begin_scope();
+
+        if self.compare(TokenKind::Semicolon) {
+            // no initializer.
+        }
+        else if self.compare(TokenKind::Let) {
+            self.let_statement();
+        }
+        else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.current_chunk().code.len();
+        let mut exit_jump = None;
+        if !self.compare(TokenKind::Semicolon) {
+            self.expression();
+            self.consume(TokenKind::Semicolon, "Expected ';' after for loop condition");
+            exit_jump = Some(self.emit_jump(OpCode::POP_JUMP_IF_FALSE));
+        }
+
+        if !self.compare(TokenKind::LBrace) {
+            let body_jump = self.emit_jump(OpCode::JUMP);
+            let increment_start = self.current_chunk().code.len();
+            self.expression();
+            self.emit_byte(OpCode::POP);
+            self.consume(TokenKind::LBrace, "Expected '{' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+
+            self.patch_jump(body_jump);
+        }
+        
+        self.block(false);
+
+        self.emit_loop(loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+        }
+
+        self.end_scope();
     }
     pub fn parse_variable(&mut self, msg: &str) -> u16 {
         self.consume(TokenKind::Identifier, msg);
@@ -391,13 +470,40 @@ impl<'a> Compiler<'a> {
             _ => unreachable!()
         }
     }
+    fn or(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JUMP_IF_TRUE);
+        self.emit_byte(OpCode::POP);
+        self.parse_precedence(Precedence::And);
+
+        self.patch_jump(end_jump);
+        if self.last_byte() != OpCode::BOOL {
+            self.emit_byte(OpCode::BOOL);
+        }
+    }
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JUMP_IF_FALSE);
+        self.emit_byte(OpCode::POP);
+        self.parse_precedence(Precedence::And);
+
+        self.patch_jump(end_jump);
+        if self.last_byte() != OpCode::BOOL {
+            self.emit_byte(OpCode::BOOL);
+        }
+    }
+}
+
+// looking at bytecode
+impl<'a> Compiler<'a> {
+    fn last_byte(&self) -> u8 {
+        *self.current_chunk().code.last().unwrap()
+    }
 }
 
 // emitting bytes
 impl<'a> Compiler<'a> {
     fn emit_byte(&mut self, byte: u8) {
         let prev_line = self.previous.line;
-        self.current_chunk().add_opcode(byte, prev_line);
+        self.current_chunk_mut().add_opcode(byte, prev_line);
     }
     fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
         self.emit_byte(byte1);
@@ -431,6 +537,7 @@ impl<'a> Compiler<'a> {
     }
     fn emit_define_variable(&mut self, id: u16) {
         if self.locals.depth() > 0 {
+            self.locals.mark_as_initialized();
             return;
         }
         if id > (u8::MAX as u16) {
@@ -443,16 +550,19 @@ impl<'a> Compiler<'a> {
     }
     fn emit_variable(&mut self, can_assign: bool) {
         let lexeme = self.previous.lexeme(self.scanner.source);
-        if let Some(index) = self.locals.get_index(lexeme) {
-            if can_assign && self.compare(TokenKind::Equal) {
-                self.expression();
-                self.emit_bytes(OpCode::SET_LOCAL, index);
+        if self.locals.depth() > 0 {
+            if let Some(index) = self.locals.get_index(lexeme) {
+                if can_assign && self.compare(TokenKind::Equal) {
+                    self.expression();
+                    self.emit_bytes(OpCode::SET_LOCAL, index);
+                }
+                else {
+                    self.emit_bytes(OpCode::GET_LOCAL, index);
+                }
+                return;
             }
-            else {
-                self.emit_bytes(OpCode::GET_LOCAL, index);
-            }
-            return;
         }
+        
         let id = self.globals.create_or_get_id(lexeme);
 
         let (instruction, instruction_long) = if can_assign && self.compare(TokenKind::Equal) {
@@ -474,9 +584,33 @@ impl<'a> Compiler<'a> {
 
     fn emit_constant(&mut self, value: Value<'a>) {
         let prev_line = self.previous.line;
-        if self.current_chunk().write_constant(value, prev_line).is_err() {
+        if self.current_chunk_mut().write_constant(value, prev_line).is_err() {
             self.error("Too many constants in one chunk.");
         }
+    }
+
+    fn emit_jump(&mut self, instruction: u8) -> usize {
+        self.emit_byte(instruction);
+        self.emit_bytes(0xFF, 0xFF);
+        self.current_chunk_mut().code.len() - 2
+    }
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.current_chunk_mut().code.len() - offset - 2;
+
+        if jump > u16::MAX as usize {
+            self.error("Then branch is too nig to jump over.");
+            return;
+        }
+        self.current_chunk_mut().code[offset] = (jump >> 8) as u8;
+        self.current_chunk_mut().code[offset + 1] = (jump & 0xFF) as u8;
+    }
+    fn emit_loop(&mut self, loop_start: usize) {
+        self.emit_byte(OpCode::LOOP);
+        let offset = self.current_chunk_mut().code.len() - loop_start + 2;
+        if offset > u16::MAX as usize {
+            self.error("Loop body is too large.");
+        }
+        self.emit_bytes((offset >> 8) as u8, (offset & 0xFF) as u8)
     }
 }
 
@@ -498,6 +632,9 @@ impl<'a> Compiler<'a> {
         use TokenKind as TK;
         static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s, _| s.grouping()), None, Precedence::None);
 
+        static OR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.or()), Precedence::Or);
+        static AND_RULE: ParseRule = ParseRule::new(None, Some(|s| s.and()), Precedence::And);
+
         static BITWISE_OR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseOr);
         static BITWISE_XOR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseXor);
         static BITWISE_AND_RULE: ParseRule = ParseRule::new(None, Some(|s| s.binary()), Precedence::BitwiseAnd);
@@ -518,6 +655,8 @@ impl<'a> Compiler<'a> {
 
         match kind {
             TK::LParen => &LPAREN_RULE,
+            TK::BarBar => &OR_RULE,
+            TK::AndAnd => &AND_RULE,
             TK::Bar => &BITWISE_OR_RULE,
             TK::Carrot => &BITWISE_XOR_RULE,
             TK::And => &BITWISE_AND_RULE,

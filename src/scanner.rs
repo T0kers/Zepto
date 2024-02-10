@@ -195,7 +195,7 @@ impl<'a> Scanner<'a> {
                 }
                 ch if ch.is_alphabetic() || ch == '_' => {
                     while let Some(next) = self.peek() {
-                        if next.is_alphanumeric() || next == '|' {self.advance();}
+                        if next.is_alphanumeric() || next == '_' {self.advance();}
                         else {break;}
                     }
                     Token::new_identifier(self.source, self.start, self.current, self.line)

@@ -14,6 +14,12 @@ impl<'a> Object<'a> {
             _ => "Object".to_string(),
         }
     }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Object::Str(s) => !s.is_empty(),
+            _ => true,
+        }
+    }
 }
 
 impl<'a> PartialEq for Object<'a> {

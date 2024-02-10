@@ -179,9 +179,13 @@ impl<'a> VM<'a> {
         self.stack_top = self.stack.as_mut_ptr();
     }
     unsafe fn read_byte(&mut self) -> u8 {
-        let instruction = *self.ip;
+        let byte = *self.ip;
         self.ip = self.ip.add(1);
-        instruction
+        byte
+    }
+    unsafe fn read_bytes(&mut self) -> u16 {
+        let bytes = (self.read_byte() as u16) << 8;
+        bytes | self.read_byte() as u16
     }
     
     pub fn run(&mut self) -> Result<(), VMError> {
@@ -218,6 +222,10 @@ impl<'a> VM<'a> {
                     }
                     OpCode::TRUE => self.push(Value::Bool(true)),
                     OpCode::FALSE => self.push(Value::Bool(false)),
+                    OpCode::BOOL => {
+                        let result = self.pop().as_bool();
+                        self.push(Value::Bool(result))
+                    },
                     OpCode::NUL => self.push(Value::Nul),
                     OpCode::ADD => self.add()?,
                     OpCode::SUB => self.sub()?,
@@ -240,9 +248,7 @@ impl<'a> VM<'a> {
                         self.globals[index] = Some(self.pop()); // TODO: MAYBE change this because of garbage collection.
                     }
                     OpCode::DEFINE_GLOBAL_LONG => {
-                        let mut index = self.read_byte() as usize;
-                        index = index << 8 | self.read_byte() as usize;
-                        self.globals[index] = Some(self.pop()); // TODO: MAYBE change this because of garbage collection.
+                        self.globals[self.read_bytes() as usize] = Some(self.pop()); // TODO: MAYBE change this because of garbage collection.
                     },
                     OpCode::SET_GLOBAL => {
                         let index = self.read_byte() as usize;
@@ -256,8 +262,7 @@ impl<'a> VM<'a> {
                         }
                     }
                     OpCode::SET_GLOBAL_LONG => {
-                        let mut index = self.read_byte() as usize;
-                        index = index << 8 | self.read_byte() as usize;
+                        let index = self.read_bytes() as usize;
                         match self.globals[index] {
                             Some(_) => {
                                 self.globals[index] = Some(self.peek(0)); // TODO: MAYBE change this because of garbage collection.
@@ -266,6 +271,10 @@ impl<'a> VM<'a> {
                                 self.runtime_error("Cannot assign to undefined variable.")?; // TODO: show variable name in message.
                             }
                         }
+                    }
+                    OpCode::SET_LOCAL => {
+                        let index = self.read_byte() as usize;
+                        self.stack[index] = self.peek(0); // TODO: MAYBE change this because of garbage collection.
                     }
                     OpCode::GET_GLOBAL => {
                         let index = self.read_byte() as usize;
@@ -276,19 +285,54 @@ impl<'a> VM<'a> {
                         }
                     }
                     OpCode::GET_GLOBAL_LONG => {
-                        let mut index = self.read_byte() as usize;
-                        index = index << 8 | self.read_byte() as usize;
+                        let index = self.read_bytes() as usize;
                         if let Some(value) = &self.globals[index] {
                             self.push(value.clone());
                         } else {
                             self.runtime_error("Undefined variable.")? // TODO: show variable name in message.
                         }
                     }
+                    OpCode::GET_LOCAL => {
+                        let index = self.read_byte() as usize;
+                        self.push(self.stack[index].clone());
+                    }
                     OpCode::PRINT => println!("{}", self.pop()),
                     OpCode::POP => {self.pop();},
-                    OpCode::POP_SCOPE => for _ in 0..self.read_byte() {
-                        self.pop();
-                    },
+                    OpCode::POP_SCOPE => {
+                        self.stack_top = self.stack_top.sub(self.read_byte() as usize);
+                    }
+                    OpCode::JUMP => {
+                        let offset = self.read_bytes() as usize;
+                        self.ip = self.ip.add(offset);
+                    }
+                    OpCode::JUMP_IF_TRUE => {
+                        let offset = self.read_bytes() as usize;
+                        if self.peek(0).as_bool() {
+                            self.ip = self.ip.add(offset);
+                        }
+                    }
+                    OpCode::JUMP_IF_FALSE => {
+                        let offset = self.read_bytes() as usize;
+                        if !self.peek(0).as_bool() {
+                            self.ip = self.ip.add(offset);
+                        }
+                    }
+                    OpCode::POP_JUMP_IF_TRUE => {
+                        let offset = self.read_bytes() as usize;
+                        if self.pop().as_bool() {
+                            self.ip = self.ip.add(offset);
+                        }
+                    }
+                    OpCode::POP_JUMP_IF_FALSE => {
+                        let offset = self.read_bytes() as usize;
+                        if !self.pop().as_bool() {
+                            self.ip = self.ip.add(offset);
+                        }
+                    }
+                    OpCode::LOOP => {
+                        let offset = self.read_bytes() as usize;
+                        self.ip = self.ip.sub(offset);
+                    }
                     OpCode::RETURN => {println!("Returned: {}", self.pop())},
                     OpCode::EOF => return Ok(()),
                     _ => {

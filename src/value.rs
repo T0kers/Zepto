@@ -169,7 +169,7 @@ pub enum Value<'a> {
 impl<'a> Value<'a> {
     pub fn as_bool(&self) -> bool {
         match self {
-            Value::Obj(_) => true,
+            Value::Obj(o) => o.as_bool(),
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,
             Value::Nul => false,
