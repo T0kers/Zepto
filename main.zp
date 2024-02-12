@@ -1,6 +1,10 @@
 
 
-for let a = 0; a < 20; a = a + 1 {
-    print a;
-}
 
+{
+    let a = 2;
+    {
+        let b = 3;
+        print a + b;
+    }
+}

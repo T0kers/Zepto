@@ -272,8 +272,8 @@ impl<'a> Compiler<'a> {
         match self.current.kind.clone() {
             TokenKind::Print => {self.advance(); self.print_statement()},
             TokenKind::Let => {self.advance(); self.let_statement()},
-            TokenKind::LBrace => {self.advance(); self.block(false)},
-            TokenKind::If => {self.advance(); self.if_statement(false)},
+            TokenKind::LBrace => {self.advance(); self.block()},
+            TokenKind::If => {self.advance(); self.if_statement()},
             TokenKind::While => {self.advance(); self.while_statement()},
             TokenKind::For => {self.advance(); self.for_statement()},
             // TokenKind::Fn => self.fn_statement(),
@@ -312,13 +312,10 @@ impl<'a> Compiler<'a> {
     fn begin_scope(&mut self) {
         self.locals.begin_scope();
     }
-    fn block(&mut self, is_expr: bool) {
+    fn block(&mut self) {
         self.begin_scope();
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::EOF) {
             self.statement();
-        }
-        if is_expr {
-            todo!();
         }
         self.consume(TokenKind::RBrace, "Expected '}' after block.");
         self.end_scope();
@@ -329,11 +326,11 @@ impl<'a> Compiler<'a> {
             self.emit_bytes(OpCode::POP_SCOPE, amount);
         }
     }
-    fn if_statement(&mut self, is_expr: bool) {
+    fn if_statement(&mut self) {
         self.expression();
         self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
         let then_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
-        self.block(is_expr);
+        self.block();
 
         if self.compare(TokenKind::Else) {
             self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
@@ -341,7 +338,7 @@ impl<'a> Compiler<'a> {
 
             self.patch_jump(then_jump);
 
-            self.block(is_expr);
+            self.block();
             self.patch_jump(else_jump);
         }
         else {
@@ -354,7 +351,7 @@ impl<'a> Compiler<'a> {
         let exit_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
 
         self.consume(TokenKind::LBrace, "Expected '{' after while statement.");
-        self.block(false);
+        self.block();
         self.emit_loop(loop_start);
 
         self.patch_jump(exit_jump);
@@ -393,7 +390,7 @@ impl<'a> Compiler<'a> {
             self.patch_jump(body_jump);
         }
         
-        self.block(false);
+        self.block();
 
         self.emit_loop(loop_start);
 
