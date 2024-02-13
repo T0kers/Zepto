@@ -7,16 +7,18 @@ pub mod vm;
 pub mod interpreter;
 pub mod compiler;
 pub mod scanner;
-pub mod object;
+pub mod function;
 
 use vm::VMError;
 use value::Value;
 use std::{env, fs, io::{self, Write}};
 
+use crate::function::Function;
+
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
     println!("Size of Value: {}", ::std::mem::size_of::<Value>());
-    println!("Size of Object: {}", ::std::mem::size_of::<object::Object>());
+    println!("Size of Function: {}", ::std::mem::size_of::<Function>());
     println!("Size of Option value: {}", ::std::mem::size_of::<Option<Value>>());
     
     let args: Vec<String> = env::args().collect();

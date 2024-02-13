@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::{self, Write}};
 
-use crate::{chunk::{Chunk, OpCode}, object::Object, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError, function::Function};
 
 pub struct Globals {
     global_ids: HashMap<String, u16>,
@@ -52,20 +52,31 @@ impl ScopeInfo {
     }
 }
 
-pub enum LocalError {
+pub enum CompileError {
     Overflow,
     DuplicateName,
 }
 
-pub struct Locals {
+pub enum FunctionKind {
+    Function,
+    Script,
+}
+
+pub struct Compiler {
+    function: Function,
+    kind: FunctionKind,
+
     next_index: u8,
     info: Vec<ScopeInfo>,
 }
 
-impl Locals {
-    pub fn new() -> Self {
+impl Compiler {
+    pub fn new(kind: FunctionKind) -> Self {
         Self {
-            next_index: 0,
+            function: Function::new(),
+            kind,
+
+            next_index: 1,
             info: vec![],
         }
     }
@@ -77,10 +88,10 @@ impl Locals {
         self.next_index -= count;
         count
     }
-    pub fn register_local(&mut self, name: &str) -> Result<(), LocalError> {
+    pub fn register_local(&mut self, name: &str) -> Result<(), CompileError> {
         let current_scope = self.info.last_mut().unwrap();
         if current_scope.indexes.get(name).is_some() {
-            return Err(LocalError::DuplicateName);
+            return Err(CompileError::DuplicateName);
         }
         current_scope.not_initialized = name.to_string();
         if self.next_index < u8::MAX { // IMPORTANT TODO: also check if there is space for tempoaries.
@@ -88,7 +99,7 @@ impl Locals {
             self.next_index += 1;
         }
         else {
-            return Err(LocalError::Overflow);
+            return Err(CompileError::Overflow);
         }
         Ok(())
     }
@@ -112,37 +123,29 @@ impl Locals {
     }
 }
 
-impl Default for Locals {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct Compiler<'a> {
+pub struct Parser<'a> {
     current: Token,
     previous: Token,
     scanner: Scanner<'a>,
-    pub chunk: Chunk<'a>,
     pub globals: Globals,
-    locals: Locals,
+    compiler: Compiler,
     had_error: bool,
     panic_mode: bool,
 }
 
-impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(source: &'a str, kind: FunctionKind) -> Self {
         Self {
             current: Token::new(TokenKind::Nul, 0, 0, 0),
             previous: Token::new(TokenKind::Nul, 0, 0, 0),
             scanner: Scanner::new(source),
-            chunk: Chunk::new(),
             globals: Globals::new(),
-            locals: Locals::new(),
+            compiler: Compiler::new(kind),
             had_error: false,
             panic_mode: false,
         }
     }
-    pub fn compile(&mut self) -> Result<(), VMError> {
+    pub fn compile(&mut self) -> Result<&Function, VMError> {
         self.advance();
         
         while !self.compare(TokenKind::EOF) {
@@ -161,14 +164,14 @@ impl<'a> Compiler<'a> {
                 use crate::debug;
                 debug::disassemble_chunk(self.current_chunk(), "bytecode");
             }
-            Ok(())
+            Ok(&self.compiler.function)
         }
     }
-    fn current_chunk(&self) -> &Chunk<'a> {
-        &self.chunk
+    pub fn current_chunk(&self) -> &Chunk {
+        &self.compiler.function.chunk
     }
-    fn current_chunk_mut(&mut self) -> &mut Chunk<'a> {
-        &mut self.chunk
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.compiler.function.chunk
     }
 }
 
@@ -213,7 +216,7 @@ impl Precedence {
     }
 }
 
-impl<'a> Compiler<'a> {
+impl<'a> Parser<'a> {
     fn advance(&mut self) {
         self.previous = self.current.clone();
         loop {
@@ -310,7 +313,7 @@ impl<'a> Compiler<'a> {
 
     }
     fn begin_scope(&mut self) {
-        self.locals.begin_scope();
+        self.compiler.begin_scope();
     }
     fn block(&mut self) {
         self.begin_scope();
@@ -321,7 +324,7 @@ impl<'a> Compiler<'a> {
         self.end_scope();
     }
     fn end_scope(&mut self) {
-        let amount = self.locals.end_scope();
+        let amount = self.compiler.end_scope();
         if amount > 0 {
             self.emit_bytes(OpCode::POP_SCOPE, amount);
         }
@@ -404,19 +407,19 @@ impl<'a> Compiler<'a> {
         self.consume(TokenKind::Identifier, msg);
 
         self.declare_variable();
-        if self.locals.depth() > 0 {
+        if self.compiler.depth() > 0 {
             return 0;
         }
         self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source))
     }
     fn declare_variable(&mut self) {
-        if self.locals.depth() == 0 {
+        if self.compiler.depth() == 0 {
             return;
         }
-        if let Err(e) = self.locals.register_local(self.previous.lexeme(self.scanner.source)) {
+        if let Err(e) = self.compiler.register_local(self.previous.lexeme(self.scanner.source)) {
             match e {
-                LocalError::Overflow => self.error("Too many local variables declared."),
-                LocalError::DuplicateName => self.error("A variable with the same name already exists."),
+                CompileError::Overflow => self.error("Too many local variables declared."),
+                CompileError::DuplicateName => self.error("A variable with the same name already exists."),
             }
         }
         
@@ -490,14 +493,14 @@ impl<'a> Compiler<'a> {
 }
 
 // looking at bytecode
-impl<'a> Compiler<'a> {
+impl<'a> Parser<'a> {
     fn last_byte(&self) -> u8 {
         *self.current_chunk().code.last().unwrap()
     }
 }
 
 // emitting bytes
-impl<'a> Compiler<'a> {
+impl<'a> Parser<'a> {
     fn emit_byte(&mut self, byte: u8) {
         let prev_line = self.previous.line;
         self.current_chunk_mut().add_opcode(byte, prev_line);
@@ -528,13 +531,13 @@ impl<'a> Compiler<'a> {
         })
     }
     fn emit_string(&mut self) {
-        self.emit_constant(Value::Obj(Box::new(Object::Str(
+        self.emit_constant(Value::Str(Box::new(
             self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
-        ))));
+        )));
     }
     fn emit_define_variable(&mut self, id: u16) {
-        if self.locals.depth() > 0 {
-            self.locals.mark_as_initialized();
+        if self.compiler.depth() > 0 {
+            self.compiler.mark_as_initialized();
             return;
         }
         if id > (u8::MAX as u16) {
@@ -547,8 +550,8 @@ impl<'a> Compiler<'a> {
     }
     fn emit_variable(&mut self, can_assign: bool) {
         let lexeme = self.previous.lexeme(self.scanner.source);
-        if self.locals.depth() > 0 {
-            if let Some(index) = self.locals.get_index(lexeme) {
+        if self.compiler.depth() > 0 {
+            if let Some(index) = self.compiler.get_index(lexeme) {
                 if can_assign && self.compare(TokenKind::Equal) {
                     self.expression();
                     self.emit_bytes(OpCode::SET_LOCAL, index);
@@ -579,7 +582,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn emit_constant(&mut self, value: Value<'a>) {
+    fn emit_constant(&mut self, value: Value) {
         let prev_line = self.previous.line;
         if self.current_chunk_mut().write_constant(value, prev_line).is_err() {
             self.error("Too many constants in one chunk.");
@@ -613,18 +616,18 @@ impl<'a> Compiler<'a> {
 
 
 struct ParseRule {
-    prefix: Option<fn(&mut Compiler, bool)>,
-    infix: Option<fn(&mut Compiler)>,
+    prefix: Option<fn(&mut Parser, bool)>,
+    infix: Option<fn(&mut Parser)>,
     precedence: Precedence,
 }
 
 impl ParseRule {
-    pub const fn new(prefix: Option<fn(&mut Compiler, bool)>, infix: Option<fn(&mut Compiler)>, precedence: Precedence) -> Self {
+    pub const fn new(prefix: Option<fn(&mut Parser, bool)>, infix: Option<fn(&mut Parser)>, precedence: Precedence) -> Self {
         Self {prefix, infix, precedence}
     } 
 }
 
-impl<'a> Compiler<'a> {
+impl<'a> Parser<'a> {
     fn get_rule(&self, kind: &TokenKind) -> &'static ParseRule {
         use TokenKind as TK;
         static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s, _| s.grouping()), None, Precedence::None);
@@ -673,7 +676,7 @@ impl<'a> Compiler<'a> {
 }
 
 // error handling
-impl<'a> Compiler<'a> {
+impl<'a> Parser<'a> {
     fn error_at_current(&mut self, msg: &str) {
         self.error_at(self.current.clone(), msg);
     }

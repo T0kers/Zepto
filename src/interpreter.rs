@@ -1,8 +1,8 @@
-use crate::{compiler::Compiler, vm::{VM, VMError}};
+use crate::{compiler::{Parser, FunctionKind}, vm::{VM, VMError}, function::Function};
 
 pub fn interpret(source: &str) -> Result<(), VMError> {
-    let mut compiler = Compiler::new(source);
-    compiler.compile()?;
-    let mut vm = VM::new(&compiler.chunk, compiler.globals.next_id);
+    let mut parser = Parser::new(source, FunctionKind::Script);
+    let function = parser.compile()?;
+    let mut vm = VM::new(parser.current_chunk(), parser.globals.next_id);
     vm.run()
 }

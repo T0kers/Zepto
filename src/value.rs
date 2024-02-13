@@ -1,5 +1,5 @@
-use std::{fmt, ops, cmp::Ordering};
-use crate::object::Object;
+use std::{cmp::Ordering, fmt::{self, write}, ops, rc::Rc};
+use crate::function::Function;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Number {
@@ -159,17 +159,19 @@ impl fmt::Display for Number {
 }
 
 #[derive(Clone)]
-pub enum Value<'a> {
-    Obj(Box<Object<'a>>),
+pub enum Value {
+    Fn(Rc<Function>),
+    Str(Box<String>),
     Num(Number),
     Bool(bool),
     Nul,
 }
 
-impl<'a> Value<'a> {
+impl Value {
     pub fn as_bool(&self) -> bool {
         match self {
-            Value::Obj(o) => o.as_bool(),
+            Value::Fn(_) => true,
+            Value::Str(o) => !(**o).is_empty(),
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,
             Value::Nul => false,
@@ -177,10 +179,11 @@ impl<'a> Value<'a> {
     }
 }
 
-impl<'a> fmt::Display for Value<'a> {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Obj(o) => write!(f, "{}", o),
+            Value::Fn(_) => write!(f, "Function"),
+            Value::Str(o) => write!(f, "{}", o),
             Value::Num(i) => write!(f, "{}", i),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nul => write!(f, "nul"),

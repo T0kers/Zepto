@@ -1,4 +1,5 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::Object};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, function::Function};
+use std::ptr;
 
 
 pub enum VMError {
@@ -6,12 +7,30 @@ pub enum VMError {
     RuntimeError,
 }
 
-pub struct VM<'a> {
-    chunk: &'a Chunk<'a>,
-    ip: *const u8,
-    stack: [Value<'a>; 256],
-    stack_top: *mut Value<'a>,
-    globals: Box<[Option<Value<'a>>]>
+pub struct CallFrame {
+    function: Function,
+    pub ip: *const u8,
+    slots: *mut Value,
+}
+
+impl CallFrame {
+    pub const fn new() -> Self {
+        let function = Function::new();
+        Self {
+            function,
+            ip: ptr::null(),
+            slots: ptr::null_mut(),
+        }
+    }
+}
+
+pub struct VM {
+    frames: [CallFrame; 64],
+    frame: *const CallFrame,
+    frame_count: usize,
+    stack: [Value; 256],
+    stack_top: *mut Value,
+    globals: Box<[Option<Value>]>
 }
 
 macro_rules! build_comparison_op {
@@ -58,15 +77,12 @@ macro_rules! build_int_op {
     };
 }
 
-impl<'a> VM<'a> {
+impl VM {
     pub unsafe fn add(&mut self) -> Result<(), VMError> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => match (*a, *b) {
-                (Object::Str(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(a + &b)))),
-                _ => return self.runtime_error("Unexpected operand types."),
-            },
+            (Value::Str(a), Value::Str(b)) => self.push(Value::Str(Box::new(*a + b.as_str()))),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a + b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) + Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a + Number::Int(b as i64))),
@@ -95,12 +111,12 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Num(b)) => match (*a, b) {
-                (Object::Str(a), Number::Int(b)) => self.push(Value::Obj(Box::new(Object::Str(a.repeat(b as usize))))),
+            (Value::Str(a), Value::Num(b)) => match b {
+                Number::Int(b) => self.push(Value::Str(Box::new(a.repeat(b as usize)))),
                 _ => return self.runtime_error("Unexpected operand types."),
             }
-            (Value::Num(a), Value::Obj(b)) => match (a, *b) {
-                (Number::Int(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(b.repeat(a as usize))))),
+            (Value::Num(a), Value::Str(b)) => match a {
+                Number::Int(a) => self.push(Value::Str(Box::new(b.repeat(a as usize)))),
                 _ => return self.runtime_error("Unexpected operand types."),
             }
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a * b)),
@@ -146,7 +162,7 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => self.push(Value::Bool(a == b)),
+            (Value::Str(a), Value::Str(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Bool(a == b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a == Number::Int(b as i64))),
@@ -162,25 +178,30 @@ impl<'a> VM<'a> {
     build_comparison_op!(greater, >);
 }
 
-impl<'a> VM<'a> {
-    pub fn new(chunk: &'a Chunk, global_count: u16) -> Self {
-        let ip = chunk.code.as_ptr();
-        const ARRAY_REPEAT_VALUE: Value<'_> = Value::Nul;
-        let mut stack = [ARRAY_REPEAT_VALUE; 256];
-        Self {
-            chunk,
-            ip,
-            stack_top: stack.as_mut_ptr(),
+impl VM {
+    pub fn new<'a>(chunk: &'a Chunk, global_count: u16) -> Self {
+        const STACK_REPEAT_VALUE: Value = Value::Nul;
+        const CALLFRAME_REPEAT_VALUE: CallFrame = CallFrame::new();
+        let mut stack = [STACK_REPEAT_VALUE; 256];
+        let mut instance = Self {
+            frames: [CALLFRAME_REPEAT_VALUE; 64],
+            frame: ptr::null(),
+            frame_count: 0, 
             stack,
+            stack_top: stack.as_mut_ptr(),
             globals: vec![None; global_count as usize].into_boxed_slice(),
+        };
+        for frame in &mut instance.frames {
+            frame.slots = instance.stack.as_mut_ptr();
         }
+        instance
     }
     fn reset_stack(&mut self) {
         self.stack_top = self.stack.as_mut_ptr();
     }
     unsafe fn read_byte(&mut self) -> u8 {
-        let byte = *self.ip;
-        self.ip = self.ip.add(1);
+        let byte = *(*self.frame).ip;
+        (*self.frame).ip = (*self.frame).ip.add(1);
         byte
     }
     unsafe fn read_bytes(&mut self) -> u16 {
@@ -188,36 +209,35 @@ impl<'a> VM<'a> {
         bytes | self.read_byte() as u16
     }
     
-    pub fn run(&mut self) -> Result<(), VMError> {
-        self.ip = self.chunk.code.as_ptr();
+    pub unsafe fn run(&mut self) -> Result<(), VMError> {
+        self.frame = self.frames.as_ptr().add(self.frame_count - 1);
         self.stack_top = self.stack.as_mut_ptr();
         unsafe {
             loop {
-                #[cfg(feature = "debug_code")]
+                //#[cfg(feature = "debug_code")]
                 {
                     use crate::debug;
                     print!("        [ ");
                     let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
                     for index in 0..stack_size {
                         print!("{} ", match &self.stack[index] {
-                            Value::Obj(o) => o.debug_string(),
+                            Value::Str(o) => String::from("\"") + o + "\"",
                             other => other.to_string(),
                         });
                     }
                     println!("]");
-                    debug::disassemble_instruction(&self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
+                    debug::disassemble_instruction(&(*self.frame).function.chunk, (*self.frame).ip.offset_from((*self.frame).function.chunk.code.as_ptr()) as usize);
                 }
                 
                 match self.read_byte() {
                     OpCode::CONSTANT => {
                         let index = self.read_byte() as usize;
-                        let constant = self.chunk.constants[index].clone();
+                        let constant = (*self.frame).function.chunk.constants[index].clone();
                         self.push(constant);
                     }
                     OpCode::CONSTANT_LONG => {
-                        let mut index = self.read_byte() as usize;
-                        index = index << 8 | self.read_byte() as usize;
-                        let constant = self.chunk.constants[index].clone();
+                        let mut index = self.read_bytes() as usize;
+                        let constant = (*self.frame).function.chunk.constants[index].clone();
                         self.push(constant);
                     }
                     OpCode::TRUE => self.push(Value::Bool(true)),
@@ -274,7 +294,7 @@ impl<'a> VM<'a> {
                     }
                     OpCode::SET_LOCAL => {
                         let index = self.read_byte() as usize;
-                        self.stack[index] = self.peek(0); // TODO: MAYBE change this because of garbage collection.
+                        *(*self.frame).slots.add(index) = self.peek(0); // TODO: MAYBE change this because of garbage collection.
                     }
                     OpCode::GET_GLOBAL => {
                         let index = self.read_byte() as usize;
@@ -303,35 +323,35 @@ impl<'a> VM<'a> {
                     }
                     OpCode::JUMP => {
                         let offset = self.read_bytes() as usize;
-                        self.ip = self.ip.add(offset);
+                        (*self.frame).ip = (*self.frame).ip.add(offset);
                     }
                     OpCode::JUMP_IF_TRUE => {
                         let offset = self.read_bytes() as usize;
                         if self.peek(0).as_bool() {
-                            self.ip = self.ip.add(offset);
+                            (*self.frame).ip = (*self.frame).ip.add(offset);
                         }
                     }
                     OpCode::JUMP_IF_FALSE => {
                         let offset = self.read_bytes() as usize;
                         if !self.peek(0).as_bool() {
-                            self.ip = self.ip.add(offset);
+                            (*self.frame).ip = (*self.frame).ip.add(offset);
                         }
                     }
                     OpCode::POP_JUMP_IF_TRUE => {
                         let offset = self.read_bytes() as usize;
                         if self.pop().as_bool() {
-                            self.ip = self.ip.add(offset);
+                            (*self.frame).ip = (*self.frame).ip.add(offset);
                         }
                     }
                     OpCode::POP_JUMP_IF_FALSE => {
                         let offset = self.read_bytes() as usize;
                         if !self.pop().as_bool() {
-                            self.ip = self.ip.add(offset);
+                            (*self.frame).ip = (*self.frame).ip.add(offset);
                         }
                     }
                     OpCode::LOOP => {
                         let offset = self.read_bytes() as usize;
-                        self.ip = self.ip.sub(offset);
+                        (*self.frame).ip = (*self.frame).ip.sub(offset);
                     }
                     OpCode::RETURN => {println!("Returned: {}", self.pop())},
                     OpCode::EOF => return Ok(()),
@@ -343,21 +363,21 @@ impl<'a> VM<'a> {
         }
     }
 
-    unsafe fn push(&mut self, value: Value<'a>) {
+    unsafe fn push(&mut self, value: Value) {
         *self.stack_top = value;
         self.stack_top = self.stack_top.add(1);
     }
-    unsafe fn pop(&mut self) -> Value<'a> {
+    unsafe fn pop(&mut self) -> Value {
         self.stack_top = self.stack_top.sub(1);
         (*self.stack_top).clone()
     }
-    unsafe fn peek(&mut self, distance: usize) -> Value<'a> {
+    unsafe fn peek(&mut self, distance: usize) -> Value {
         (*self.stack_top.sub(1 + distance)).clone()
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
         eprintln!("{}", msg);
-        eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
+        eprintln!("[Line {}] in script.", (*self.frame).function.chunk.line(((*self.frame).ip.offset_from((*self.frame).function.chunk.code.as_ptr()) - 1) as usize));
         self.reset_stack();
         Err(VMError::RuntimeError)
     }
