@@ -158,7 +158,7 @@ impl fmt::Display for Number {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Str(Box<String>),
     Fn(Box<Function>),
@@ -170,7 +170,7 @@ pub enum Value {
 impl Value {
     pub fn as_bool(&self) -> bool {
         match self {
-            Value::Str(o) => !(**o).is_empty(),
+            Value::Str(s) => !(**s).is_empty(),
             Value::Fn(_) => true,
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,

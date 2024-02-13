@@ -1,4 +1,5 @@
 use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
+use std::ptr;
 
 
 pub enum VMError {
@@ -6,12 +7,32 @@ pub enum VMError {
     RuntimeError,
 }
 
+struct CallInfo {
+    return_address: *const u8,
+    stack_offset: usize,
+}
+
+impl CallInfo {
+    pub const fn new() -> Self {
+        Self {
+            return_address: ptr::null(),
+            stack_offset: 0,
+        }
+    }
+    pub fn set(&mut self, return_address: *const u8, stack_offset: usize) {
+        self.return_address = return_address;
+        self.stack_offset = stack_offset;
+    }
+}
+
 pub struct VM<'a> {
     chunk: &'a Chunk,
     ip: *const u8,
     stack: [Value; 256],
     stack_top: *mut Value,
-    globals: Box<[Option<Value>]>
+    globals: Box<[Option<Value>]>,
+    call_stack: [CallInfo; 64],
+    call_stack_ptr: *mut CallInfo,
 }
 
 macro_rules! build_comparison_op {
@@ -154,16 +175,17 @@ impl<'a> VM<'a> {
 }
 
 impl<'a> VM<'a> {
-    pub fn new(chunk: &'a Chunk, global_count: u16) -> Self {
-        let ip = chunk.code.as_ptr();
-        const ARRAY_REPEAT_VALUE: Value = Value::Nul;
-        let mut stack = [ARRAY_REPEAT_VALUE; 256];
+    pub fn new(chunk: &'a Chunk, globals: Vec<Option<Value>>) -> Self {
+        const STACK_REPEAT_VALUE: Value = Value::Nul;
+        const CALL_STACK_REPEAT_VALUE: CallInfo = CallInfo::new();
         Self {
             chunk,
-            ip,
-            stack_top: stack.as_mut_ptr(),
-            stack,
-            globals: vec![None; global_count as usize].into_boxed_slice(),
+            ip: ptr::null(),
+            stack_top: ptr::null_mut(),
+            stack: [STACK_REPEAT_VALUE; 256],
+            globals: globals.into_boxed_slice(),
+            call_stack: [CALL_STACK_REPEAT_VALUE; 64],
+            call_stack_ptr: ptr::null_mut(),
         }
     }
     fn reset_stack(&mut self) {
@@ -179,8 +201,9 @@ impl<'a> VM<'a> {
         bytes | self.read_byte() as u16
     }
     
-    pub fn run(&mut self) -> Result<(), VMError> {
+    pub fn run(&mut self) -> Result<Value, VMError> {
         self.ip = self.chunk.code.as_ptr();
+        self.call_stack_ptr = self.call_stack.as_mut_ptr();
         self.stack_top = self.stack.as_mut_ptr();
         unsafe {
             loop {
@@ -261,7 +284,7 @@ impl<'a> VM<'a> {
                         }
                     }
                     OpCode::SET_LOCAL => {
-                        let index = self.read_byte() as usize;
+                        let index = self.read_byte() as usize + (*self.call_stack_ptr.sub(1)).stack_offset;
                         self.stack[index] = self.peek(0); // TODO: MAYBE change this because of garbage collection.
                     }
                     OpCode::GET_GLOBAL => {
@@ -281,7 +304,7 @@ impl<'a> VM<'a> {
                         }
                     }
                     OpCode::GET_LOCAL => {
-                        let index = self.read_byte() as usize;
+                        let index = self.read_byte() as usize + (*self.call_stack_ptr.sub(1)).stack_offset;
                         self.push(self.stack[index].clone());
                     }
                     OpCode::PRINT => println!("{}", self.pop()),
@@ -321,8 +344,25 @@ impl<'a> VM<'a> {
                         let offset = self.read_bytes() as usize;
                         self.ip = self.ip.sub(offset);
                     }
-                    OpCode::RETURN => {println!("Returned: {}", self.pop())},
-                    OpCode::EOF => return Ok(()),
+                    OpCode::CALL => {
+                        let function_offset = self.read_byte() as usize;
+                        match self.peek(function_offset) {
+                            Value::Fn(f) => {
+                                (*self.call_stack_ptr).set(self.ip, self.stack_top.offset_from(self.stack.as_ptr()) as usize - f.arity as usize);
+                                self.call_stack_ptr = self.call_stack_ptr.add(1);
+                                self.ip = self.chunk.code.as_ptr().add(f.start);
+                            }
+                            _ => self.runtime_error("Can only call functions.")?,
+                        }
+                    }
+                    OpCode::RETURN => {
+                        let return_value = self.pop();
+                        self.call_stack_ptr = self.call_stack_ptr.sub(1);
+                        self.stack_top = self.stack.as_mut_ptr().add((*self.call_stack_ptr).stack_offset - 1);
+                        self.ip = (*self.call_stack_ptr).return_address;
+                        self.push(return_value);
+                    },
+                    OpCode::EOF => return Ok(self.pop()),
                     _ => {
                         self.runtime_error("Found unknown opcode.")?
                     },

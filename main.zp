@@ -1,10 +1,14 @@
 
+fn fib(n) {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 2) + fib(n - 1);
+}
 
-
-{
-    let a = 2;
-    {
-        let b = 3;
-        print a + b;
+fn main() {
+    for let n = 0; n < 40; n = n + 1 {
+        print fib(n);
     }
 }
+

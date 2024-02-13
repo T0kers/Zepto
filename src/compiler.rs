@@ -1,24 +1,30 @@
 use std::{collections::HashMap, io::{self, Write}};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError, object::Function};
 
 pub struct Globals {
+    pub globals: Vec<Option<Value>>,
     global_ids: HashMap<String, u16>,
-    pub next_id: u16,
+    next_id: u16,
 }
 
 impl Globals {
     pub fn new() -> Self {
         Self {
+            globals: vec![],
             global_ids: HashMap::new(),
             next_id: 0,
         }
+    }
+    pub fn define_id(&mut self, id: u16, value: Value) {
+        self.globals[id as usize] = Some(value);
     }
     pub fn create_or_get_id(&mut self, name: &str) -> u16 {
         if let Some(id) = self.global_ids.get(name) {
             *id
         }
         else {
+            self.globals.push(None);
             let id = self.next_id;
             self.global_ids.insert(name.to_string(), id);
             self.next_id += 1;
@@ -146,10 +152,15 @@ impl<'a> Compiler<'a> {
         self.advance();
         
         while !self.compare(TokenKind::EOF) {
-            self.statement();
+            self.declaration(true);
         }
 
         self.consume(TokenKind::EOF, "Expected end of tokens.");
+        self.emit_byte(OpCode::GET_GLOBAL_LONG);
+        let id = self.globals.create_or_get_id("main");
+        self.emit_bytes((id << 8) as u8, (id & 0xFF) as u8);
+        self.emit_bytes(OpCode::CALL, 0);
+
         self.emit_byte(OpCode::EOF);
 
         if self.had_error {
@@ -160,6 +171,7 @@ impl<'a> Compiler<'a> {
             {
                 use crate::debug;
                 debug::disassemble_chunk(self.current_chunk(), "bytecode");
+                println!("{:?}", self.globals.globals);
             }
             Ok(())
         }
@@ -271,21 +283,32 @@ impl<'a> Compiler<'a> {
     fn statement(&mut self) {
         match self.current.kind.clone() {
             TokenKind::Print => {self.advance(); self.print_statement()},
-            TokenKind::Let => {self.advance(); self.let_statement()},
             TokenKind::LBrace => {self.advance(); self.block()},
             TokenKind::If => {self.advance(); self.if_statement()},
             TokenKind::While => {self.advance(); self.while_statement()},
             TokenKind::For => {self.advance(); self.for_statement()},
-            // TokenKind::Fn => self.fn_statement(),
-            // TokenKind::Return => self.return_statement(),
+            TokenKind::Return => {self.advance(); self.return_statement()},
             // TokenKind::Break => self.break_statement(),
             // TokenKind::Continue => self.continue_statement(),
-            _ => self.expression_statement(),
+            _ => if !self.declaration(false) {
+                self.expression_statement();
+            },
         }
 
         if self.panic_mode {
             self.syncronize();
         }
+    }
+    fn declaration(&mut self, do_panic: bool) -> bool {
+        let found_declaration = match self.current.kind.clone() {
+            TokenKind::Let => {self.advance(); self.let_declaration(); true},
+            TokenKind::Fn => {self.advance(); self.fn_declaration(); true},
+            _ => {if do_panic {self.error_at_current("Expected declaration."); self.advance();} false},
+        };
+        if self.panic_mode {
+            self.syncronize();
+        }
+        found_declaration
     }
     fn expression_statement(&mut self) {
         self.expression();
@@ -297,7 +320,7 @@ impl<'a> Compiler<'a> {
         self.consume(TokenKind::Semicolon, "Expected ';' at end of print statement.");
         self.emit_byte(OpCode::PRINT);
     }
-    fn let_statement(&mut self) {
+    fn let_declaration(&mut self) {
         let id = self.parse_variable("Expected variable name.");
         if self.compare(TokenKind::Equal) {
             self.expression()
@@ -308,6 +331,54 @@ impl<'a> Compiler<'a> {
         self.consume(TokenKind::Semicolon, "Expected ';' after variable declaration.");
         self.emit_define_variable(id);
 
+    }
+    fn fn_declaration(&mut self) {
+        let skip_function = self.emit_jump(OpCode::JUMP); // is used to skip function when defining global variables.
+
+        let fn_start = self.current_chunk().code.len();
+
+        self.consume(TokenKind::Identifier, "Expected function name.");
+        let function_lexeme = self.previous.lexeme(self.scanner.source);
+        let id = self.globals.create_or_get_id(function_lexeme);
+
+        self.consume(TokenKind::LParen, "Expected '(' after function name.");
+
+        self.begin_scope();
+
+        let mut parameter_count: u16 = 0;
+        if self.check(TokenKind::Identifier) {
+            let id = self.parse_variable("This error should not happen.");
+            self.emit_define_variable(id);
+            parameter_count += 1;
+
+            loop {
+                if self.compare(TokenKind::Comma) {
+                    let id = self.parse_variable("Expected parameter name.");
+                    self.emit_define_variable(id);
+                    parameter_count += 1;
+                }
+                else {
+                    break;
+                }
+            }
+        }
+        if parameter_count > u8::MAX as u16 {
+            self.error("Can't have more than 255 parameters.");
+        }
+        let parameter_count = parameter_count as u8;
+
+        self.consume(TokenKind::RParen, "Expected ')' after parameters.");
+
+        self.consume(TokenKind::LBrace, "Expected '{' after while statement.");
+        self.block();
+        
+        self.emit_bytes(OpCode::NUL, OpCode::RETURN);
+
+        self.end_scope();
+
+        self.globals.define_id(id, Value::Fn(Box::new(Function::new(parameter_count, fn_start))));
+
+        self.patch_jump(skip_function);
     }
     fn begin_scope(&mut self) {
         self.locals.begin_scope();
@@ -363,7 +434,7 @@ impl<'a> Compiler<'a> {
             // no initializer.
         }
         else if self.compare(TokenKind::Let) {
-            self.let_statement();
+            self.let_declaration();
         }
         else {
             self.expression_statement();
@@ -399,6 +470,11 @@ impl<'a> Compiler<'a> {
         }
 
         self.end_scope();
+    }
+    fn return_statement(&mut self) {
+        self.expression();
+        self.consume(TokenKind::Semicolon, "Expected ';' after return statement.");
+        self.emit_byte(OpCode::RETURN);
     }
     pub fn parse_variable(&mut self, msg: &str) -> u16 {
         self.consume(TokenKind::Identifier, msg);
@@ -466,6 +542,25 @@ impl<'a> Compiler<'a> {
             TokenKind::CarrotCarrot => {},
             _ => unreachable!()
         }
+    }
+    fn call(&mut self) {
+        let mut arg_count: u16 = 0;
+        if !self.check(TokenKind::RParen) {
+            loop {
+                self.expression();
+                arg_count += 1;
+
+                if !self.compare(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenKind::RParen, "Expected ')' after arguments.");
+        if arg_count > u8::MAX as u16 {
+            self.error("Functions cant have more than 255 arguments.");
+        }
+        let arg_count = arg_count as u8;
+        self.emit_bytes(OpCode::CALL, arg_count);
     }
     fn or(&mut self) {
         let end_jump = self.emit_jump(OpCode::JUMP_IF_TRUE);
@@ -627,7 +722,7 @@ impl ParseRule {
 impl<'a> Compiler<'a> {
     fn get_rule(&self, kind: &TokenKind) -> &'static ParseRule {
         use TokenKind as TK;
-        static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s, _| s.grouping()), None, Precedence::None);
+        static LPAREN_RULE: ParseRule = ParseRule::new(Some(|s, _| s.grouping()), Some(|s| s.call()), Precedence::Call);
 
         static OR_RULE: ParseRule = ParseRule::new(None, Some(|s| s.or()), Precedence::Or);
         static AND_RULE: ParseRule = ParseRule::new(None, Some(|s| s.and()), Precedence::And);
@@ -696,12 +791,11 @@ impl<'a> Compiler<'a> {
     fn syncronize(&mut self) {
         self.panic_mode = false;
         while self.current.kind != TokenKind::EOF {
-            if self.previous.kind != TokenKind::Semicolon {return;}
+            if self.previous.kind == TokenKind::Semicolon {return;}
             match self.current.kind {
-                TokenKind::Print | TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords maybe.
-                _ => {}
+                TokenKind::Print | TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords
+                _ => self.advance(),
             }
-            self.advance();
         }
     }
 }

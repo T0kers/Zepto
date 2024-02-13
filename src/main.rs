@@ -54,7 +54,7 @@ fn run_file(path: &str) {
     let source = fs::read_to_string(path).expect("Unable to read file.");
 
     match interpreter::interpret(&source) {
-        Ok(_) => println!("Program exited succesfully!"),
+        Ok(v) => println!("Program exited succesfully with value: {}", v),
         Err(e) => match e {
             VMError::CompileError => println!("Error when compiling!"),
             VMError::RuntimeError => println!("Runtime error ocurred!"),

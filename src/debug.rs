@@ -57,6 +57,7 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         OpCode::POP_JUMP_IF_TRUE => variable_instruction_long("POP_JUMP_IF_TRUE", chunk, i),
         OpCode::POP_JUMP_IF_FALSE => variable_instruction_long("POP_JUMP_IF_FALSE", chunk, i),
         OpCode::LOOP => variable_instruction_long("LOOP", chunk, i),
+        OpCode::CALL => variable_instruction("CALL", chunk, i),
         OpCode::RETURN => simple_instruction("RETURN", i),
         OpCode::EOF => simple_instruction("EOF", i),
         _ => {println!("????"); i + 1},
