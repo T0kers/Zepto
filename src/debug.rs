@@ -75,23 +75,22 @@ fn variable_instruction_long(name: &str, chunk: &Chunk, i: usize) -> usize {
     i + 3
 }
 
+pub fn print_value(value: &Value) -> String {
+    match value {
+        Value::Str(o) => String::from("\"") + o + "\"",
+        other => other.to_string(),
+    }
+}
+
 fn constant_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {
     let index = chunk.code[i + 1] as usize;
-    let constant = match &chunk.constants[index] {
-        Value::Obj(o) => o.debug_string(),
-        other => other.to_string(),
-    };
-    println!("{} {} {}", name, index, constant);
+    println!("{} {} {}", name, index, print_value(&chunk.constants[index]));
     i + 2
 }
 
 fn constant_long_instruction(name: &str, chunk: &Chunk, i: usize) -> usize {
     let index: usize = ((chunk.code[i + 1] as usize) << 8) | (chunk.code[i + 2] as usize);
-    let constant = match &chunk.constants[index] {
-        Value::Obj(o) => o.debug_string(),
-        other => other.to_string(),
-    };
-    println!("{} {} {}", name, index, constant);
+    println!("{} {} {}", name, index, print_value(&chunk.constants[index]));
     i + 3
 }
 

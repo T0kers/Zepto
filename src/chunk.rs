@@ -40,13 +40,13 @@ struct LineEnocding {
     line: u32,
 }
 
-pub struct Chunk<'a> {
+pub struct Chunk {
     pub code: Vec<u8>,
-    pub constants: Vec<Value<'a>>,
+    pub constants: Vec<Value>,
     lines: Vec<LineEnocding>,
 }
 
-impl<'a> Chunk<'a> {
+impl Chunk {
     pub fn new() -> Self {
         Self {
             code: vec![],
@@ -58,11 +58,11 @@ impl<'a> Chunk<'a> {
         self.code.push(opcode);
         self.add_line(line);
     }
-    pub fn add_constant(&mut self, value: Value<'a>) -> Result<u16, TryFromIntError> {
+    pub fn add_constant(&mut self, value: Value) -> Result<u16, TryFromIntError> {
         self.constants.push(value);
         (self.constants.len() - 1).try_into()
     }
-    pub fn write_constant(&mut self, value: Value<'a>, line: u32) -> Result<(), TryFromIntError> {
+    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), TryFromIntError> {
         let index: u16 = self.add_constant(value)?;
         if index > (u8::MAX as u16) {
             self.add_opcode(OpCode::CONSTANT_LONG, line);
@@ -101,7 +101,7 @@ impl<'a> Chunk<'a> {
     } 
 }
 
-impl<'a> Default for Chunk<'a> {
+impl Default for Chunk {
     fn default() -> Self {
         Chunk::new()
     }

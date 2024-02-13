@@ -1,5 +1,5 @@
 use std::{fmt, ops, cmp::Ordering};
-use crate::object::Object;
+use crate::object::Function;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Number {
@@ -159,17 +159,19 @@ impl fmt::Display for Number {
 }
 
 #[derive(Clone)]
-pub enum Value<'a> {
-    Obj(Box<Object<'a>>),
+pub enum Value {
+    Str(Box<String>),
+    Fn(Box<Function>),
     Num(Number),
     Bool(bool),
     Nul,
 }
 
-impl<'a> Value<'a> {
+impl Value {
     pub fn as_bool(&self) -> bool {
         match self {
-            Value::Obj(o) => o.as_bool(),
+            Value::Str(o) => !(**o).is_empty(),
+            Value::Fn(_) => true,
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,
             Value::Nul => false,
@@ -177,10 +179,11 @@ impl<'a> Value<'a> {
     }
 }
 
-impl<'a> fmt::Display for Value<'a> {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Obj(o) => write!(f, "{}", o),
+            Value::Str(s) => write!(f, "{}", s),
+            Value::Fn(_) => write!(f, "<Function>"),
             Value::Num(i) => write!(f, "{}", i),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nul => write!(f, "nul"),

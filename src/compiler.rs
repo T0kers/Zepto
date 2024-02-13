@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::{self, Write}};
 
-use crate::{chunk::{Chunk, OpCode}, object::Object, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError};
 
 pub struct Globals {
     global_ids: HashMap<String, u16>,
@@ -122,7 +122,7 @@ pub struct Compiler<'a> {
     current: Token,
     previous: Token,
     scanner: Scanner<'a>,
-    pub chunk: Chunk<'a>,
+    pub chunk: Chunk,
     pub globals: Globals,
     locals: Locals,
     had_error: bool,
@@ -164,10 +164,10 @@ impl<'a> Compiler<'a> {
             Ok(())
         }
     }
-    fn current_chunk(&self) -> &Chunk<'a> {
+    fn current_chunk(&self) -> &Chunk {
         &self.chunk
     }
-    fn current_chunk_mut(&mut self) -> &mut Chunk<'a> {
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
         &mut self.chunk
     }
 }
@@ -528,9 +528,9 @@ impl<'a> Compiler<'a> {
         })
     }
     fn emit_string(&mut self) {
-        self.emit_constant(Value::Obj(Box::new(Object::Str(
+        self.emit_constant(Value::Str(Box::new(
             self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
-        ))));
+        )));
     }
     fn emit_define_variable(&mut self, id: u16) {
         if self.locals.depth() > 0 {
@@ -579,7 +579,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn emit_constant(&mut self, value: Value<'a>) {
+    fn emit_constant(&mut self, value: Value) {
         let prev_line = self.previous.line;
         if self.current_chunk_mut().write_constant(value, prev_line).is_err() {
             self.error("Too many constants in one chunk.");

@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::Object};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
 
 
 pub enum VMError {
@@ -7,11 +7,11 @@ pub enum VMError {
 }
 
 pub struct VM<'a> {
-    chunk: &'a Chunk<'a>,
+    chunk: &'a Chunk,
     ip: *const u8,
-    stack: [Value<'a>; 256],
-    stack_top: *mut Value<'a>,
-    globals: Box<[Option<Value<'a>>]>
+    stack: [Value; 256],
+    stack_top: *mut Value,
+    globals: Box<[Option<Value>]>
 }
 
 macro_rules! build_comparison_op {
@@ -63,10 +63,7 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => match (*a, *b) {
-                (Object::Str(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(a + &b)))),
-                _ => return self.runtime_error("Unexpected operand types."),
-            },
+            (Value::Str(a), Value::Str(b)) => self.push(Value::Str(Box::new(*a + b.as_str()))),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a + b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) + Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a + Number::Int(b as i64))),
@@ -95,14 +92,8 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Num(b)) => match (*a, b) {
-                (Object::Str(a), Number::Int(b)) => self.push(Value::Obj(Box::new(Object::Str(a.repeat(b as usize))))),
-                _ => return self.runtime_error("Unexpected operand types."),
-            }
-            (Value::Num(a), Value::Obj(b)) => match (a, *b) {
-                (Number::Int(a), Object::Str(b)) => self.push(Value::Obj(Box::new(Object::Str(b.repeat(a as usize))))),
-                _ => return self.runtime_error("Unexpected operand types."),
-            }
+            (Value::Str(a), Value::Num(Number::Int(b))) => self.push(Value::Str(Box::new(a.repeat(b as usize)))),
+            (Value::Num(Number::Int(a)), Value::Str(b)) => self.push(Value::Str(Box::new(b.repeat(a as usize)))),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Num(a * b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Num(Number::Int(a as i64) * Number::Int(b as i64))),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Num(a * Number::Int(b as i64))),
@@ -146,7 +137,7 @@ impl<'a> VM<'a> {
         let b = self.pop();
         let a = self.pop();
         match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => self.push(Value::Bool(a == b)),
+            (Value::Str(a), Value::Str(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Num(b)) => self.push(Value::Bool(a == b)),
             (Value::Bool(a), Value::Bool(b)) => self.push(Value::Bool(a == b)),
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a == Number::Int(b as i64))),
@@ -165,7 +156,7 @@ impl<'a> VM<'a> {
 impl<'a> VM<'a> {
     pub fn new(chunk: &'a Chunk, global_count: u16) -> Self {
         let ip = chunk.code.as_ptr();
-        const ARRAY_REPEAT_VALUE: Value<'_> = Value::Nul;
+        const ARRAY_REPEAT_VALUE: Value = Value::Nul;
         let mut stack = [ARRAY_REPEAT_VALUE; 256];
         Self {
             chunk,
@@ -199,13 +190,10 @@ impl<'a> VM<'a> {
                     print!("        [ ");
                     let stack_size = self.stack_top.offset_from(self.stack.as_ptr()) as usize;
                     for index in 0..stack_size {
-                        print!("{} ", match &self.stack[index] {
-                            Value::Obj(o) => o.debug_string(),
-                            other => other.to_string(),
-                        });
+                        print!("{} ", debug::print_value(&self.stack[index]));
                     }
                     println!("]");
-                    debug::disassemble_instruction(&self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
+                    debug::disassemble_instruction(self.chunk, self.ip.offset_from(self.chunk.code.as_ptr()) as usize);
                 }
                 
                 match self.read_byte() {
@@ -343,15 +331,15 @@ impl<'a> VM<'a> {
         }
     }
 
-    unsafe fn push(&mut self, value: Value<'a>) {
+    unsafe fn push(&mut self, value: Value) {
         *self.stack_top = value;
         self.stack_top = self.stack_top.add(1);
     }
-    unsafe fn pop(&mut self) -> Value<'a> {
+    unsafe fn pop(&mut self) -> Value {
         self.stack_top = self.stack_top.sub(1);
         (*self.stack_top).clone()
     }
-    unsafe fn peek(&mut self, distance: usize) -> Value<'a> {
+    unsafe fn peek(&mut self, distance: usize) -> Value {
         (*self.stack_top.sub(1 + distance)).clone()
     }
 
