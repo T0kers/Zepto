@@ -345,9 +345,14 @@ impl<'a> VM<'a> {
                         self.ip = self.ip.sub(offset);
                     }
                     OpCode::CALL => {
-                        let function_offset = self.read_byte() as usize;
-                        match self.peek(function_offset) {
+                        let function_offset = self.read_byte();
+                        match self.peek(function_offset as usize) {
                             Value::Fn(f) => {
+                                if f.arity != function_offset {
+                                    self.runtime_error(
+                                        &format!("Expected {} arguments but got {}.", f.arity, function_offset)
+                                    )?;
+                                }
                                 (*self.call_stack_ptr).set(self.ip, self.stack_top.offset_from(self.stack.as_ptr()) as usize - f.arity as usize);
                                 self.call_stack_ptr = self.call_stack_ptr.add(1);
                                 self.ip = self.chunk.code.as_ptr().add(f.start);

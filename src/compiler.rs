@@ -283,7 +283,7 @@ impl<'a> Compiler<'a> {
     fn statement(&mut self) {
         match self.current.kind.clone() {
             TokenKind::Print => {self.advance(); self.print_statement()},
-            TokenKind::LBrace => {self.advance(); self.block()},
+            TokenKind::LBrace => {self.advance(); self.scoped_block()},
             TokenKind::If => {self.advance(); self.if_statement()},
             TokenKind::While => {self.advance(); self.while_statement()},
             TokenKind::For => {self.advance(); self.for_statement()},
@@ -374,7 +374,7 @@ impl<'a> Compiler<'a> {
         
         self.emit_bytes(OpCode::NUL, OpCode::RETURN);
 
-        self.end_scope();
+        self.end_scope_no_emit();
 
         self.globals.define_id(id, Value::Fn(Box::new(Function::new(parameter_count, fn_start))));
 
@@ -383,33 +383,49 @@ impl<'a> Compiler<'a> {
     fn begin_scope(&mut self) {
         self.locals.begin_scope();
     }
-    fn block(&mut self) {
+    fn scoped_block(&mut self) {
         self.begin_scope();
+        self.block();
+        self.end_scope();
+    }
+    fn block(&mut self) {
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::EOF) {
             self.statement();
         }
         self.consume(TokenKind::RBrace, "Expected '}' after block.");
-        self.end_scope();
     }
     fn end_scope(&mut self) {
         let amount = self.locals.end_scope();
-        if amount > 0 {
+        if amount == 1 {
+            self.emit_byte(OpCode::POP);
+        }
+        if amount > 1 {
             self.emit_bytes(OpCode::POP_SCOPE, amount);
         }
     }
+    fn end_scope_no_emit(&mut self) {
+        self.locals.end_scope();
+    }
     fn if_statement(&mut self) {
         self.expression();
+        
         self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
         let then_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
-        self.block();
+        self.scoped_block();
 
         if self.compare(TokenKind::Else) {
-            self.consume(TokenKind::LBrace, "Expected '{' after if statement.");
             let else_jump = self.emit_jump(OpCode::JUMP);
 
             self.patch_jump(then_jump);
 
-            self.block();
+            if self.compare(TokenKind::If) {
+                self.if_statement();
+            }
+            else {
+                self.consume(TokenKind::LBrace, "Expected 'if' or '{' after else statement.");
+                self.scoped_block();
+            }
+
             self.patch_jump(else_jump);
         }
         else {
@@ -422,7 +438,7 @@ impl<'a> Compiler<'a> {
         let exit_jump = self.emit_jump(OpCode::POP_JUMP_IF_FALSE);
 
         self.consume(TokenKind::LBrace, "Expected '{' after while statement.");
-        self.block();
+        self.scoped_block();
         self.emit_loop(loop_start);
 
         self.patch_jump(exit_jump);
@@ -461,7 +477,7 @@ impl<'a> Compiler<'a> {
             self.patch_jump(body_jump);
         }
         
-        self.block();
+        self.scoped_block();
 
         self.emit_loop(loop_start);
 
