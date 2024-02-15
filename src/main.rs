@@ -18,6 +18,7 @@ fn main() {
     println!("Size of Value: {}", ::std::mem::size_of::<Value>());
     // println!("Size of Object: {}", ::std::mem::size_of::<object::Object>());
     println!("Size of Option value: {}", ::std::mem::size_of::<Option<Value>>());
+    println!("Size of native function: {}", ::std::mem::size_of::<fn([Value])>());
     
     let args: Vec<String> = env::args().collect();
 

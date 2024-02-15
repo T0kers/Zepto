@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::{self, Write}};
 
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value}, vm::VMError, object::Function};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value, NativeFn}, vm::VMError, object::Function};
 
 pub struct Globals {
     pub globals: Vec<Option<Value>>,
@@ -33,6 +33,10 @@ impl Globals {
     }
     pub fn get_id(&self, name: &str) -> Option<u16> {
         self.global_ids.get(name).cloned()
+    }
+    pub fn define_native(&mut self, name: &str, function: NativeFn) {
+        let id = self.create_or_get_id(name);
+        self.define_id(id, Value::NativeFn(function));
     }
 }
 
@@ -137,7 +141,7 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
-        Self {
+        let mut instance = Self {
             current: Token::new(TokenKind::Nul, 0, 0, 0),
             previous: Token::new(TokenKind::Nul, 0, 0, 0),
             scanner: Scanner::new(source),
@@ -146,7 +150,9 @@ impl<'a> Compiler<'a> {
             locals: Locals::new(),
             had_error: false,
             panic_mode: false,
-        }
+        };
+
+        instance
     }
     pub fn compile(&mut self) -> Result<(), VMError> {
         self.advance();
@@ -258,7 +264,6 @@ impl<'a> Compiler<'a> {
     fn check(&mut self, kind: TokenKind) -> bool {
         self.current.kind == kind
     }
-
     fn parse_precedence(&mut self, prec: Precedence) {
         self.advance();
 
@@ -488,8 +493,13 @@ impl<'a> Compiler<'a> {
         self.end_scope();
     }
     fn return_statement(&mut self) {
-        self.expression();
-        self.consume(TokenKind::Semicolon, "Expected ';' after return statement.");
+        if self.compare(TokenKind::Semicolon) {
+            self.emit_byte(OpCode::NUL);
+        }
+        else {
+            self.expression();
+            self.consume(TokenKind::Semicolon, "Expected ';' after return statement.");
+        }
         self.emit_byte(OpCode::RETURN);
     }
     pub fn parse_variable(&mut self, msg: &str) -> u16 {
@@ -689,14 +699,12 @@ impl<'a> Compiler<'a> {
             self.emit_bytes(instruction, id as u8);
         }
     }
-
     fn emit_constant(&mut self, value: Value) {
         let prev_line = self.previous.line;
         if self.current_chunk_mut().write_constant(value, prev_line).is_err() {
             self.error("Too many constants in one chunk.");
         }
     }
-
     fn emit_jump(&mut self, instruction: u8) -> usize {
         self.emit_byte(instruction);
         self.emit_bytes(0xFF, 0xFF);
