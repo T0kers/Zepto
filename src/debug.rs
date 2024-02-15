@@ -48,7 +48,6 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         OpCode::GET_LOCAL => variable_instruction("GET_LOCAL", chunk, i),
         OpCode::GREATER => simple_instruction("GREATER", i),
         OpCode::NOT => simple_instruction("NOT", i),
-        OpCode::PRINT => simple_instruction("PRINT", i),
         OpCode::POP => simple_instruction("POP", i),
         OpCode::POP_SCOPE => variable_instruction("POP_SCOPE", chunk, i),
         OpCode::JUMP => variable_instruction_long("JUMP", chunk, i),

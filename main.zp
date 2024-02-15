@@ -1,10 +1,7 @@
 
 
-fn test(a, b) {
-    return a + b;
-}
-
 fn main() {
-    test(1, 2);
+    let start = clock();
+    sleep(5001);
+    print(clock() - start);
 }
-

@@ -164,9 +164,7 @@ impl<'a> VM<'a> {
             (Value::Num(a), Value::Bool(b)) => self.push(Value::Bool(a == Number::Int(b as i64))),
             (Value::Bool(a), Value::Num(b)) => self.push(Value::Bool(Number::Int(a as i64) == b)),
             (Value::Nul, Value::Nul) => self.push(Value::Bool(true)),
-            (Value::Nul, _) => self.push(Value::Bool(false)),
-            (_, Value::Nul) => self.push(Value::Bool(false)),
-            _ => return self.runtime_error("Unexpected operand type."),
+            _ => self.push(Value::Bool(false)),
         }
         Ok(())
     }
@@ -307,7 +305,6 @@ impl<'a> VM<'a> {
                         let index = self.read_byte() as usize + (*self.call_stack_ptr.sub(1)).stack_offset;
                         self.push(self.stack[index].clone());
                     }
-                    OpCode::PRINT => println!("{}", self.pop()),
                     OpCode::POP => {self.pop();},
                     OpCode::POP_SCOPE => {
                         self.stack_top = self.stack_top.sub(self.read_byte() as usize);
@@ -358,7 +355,7 @@ impl<'a> VM<'a> {
                                 self.ip = self.chunk.code.as_ptr().add(f.start);
                             }
                             Value::NativeFn(n) => {
-                                let result = n(std::slice::from_raw_parts(self.stack_top.sub(arguments), arguments))?;
+                                let result = n(self, std::slice::from_raw_parts(self.stack_top.sub(arguments), arguments))?;
                                 self.stack_top = self.stack_top.sub(arguments + 1);
                                 self.push(result);
                             },
@@ -394,6 +391,13 @@ impl<'a> VM<'a> {
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
+        eprintln!("{}", msg);
+        eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
+        self.reset_stack();
+        Err(VMError::RuntimeError)
+    }
+
+    pub unsafe fn runtime_value_error(&mut self, msg: &str) -> Result<Value, VMError> { // TODO: this function should maybe be turned into a macro.
         eprintln!("{}", msg);
         eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
         self.reset_stack();

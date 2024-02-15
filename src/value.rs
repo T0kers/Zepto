@@ -1,5 +1,5 @@
 use std::{fmt, ops, cmp::Ordering};
-use crate::{object::Function, vm::VMError};
+use crate::{object::Function, vm::{VM, VMError}};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Number {
@@ -158,7 +158,7 @@ impl fmt::Display for Number {
     }
 }
 
-pub type NativeFn = fn(&[Value]) -> Result<Value, VMError>;
+pub type NativeFn = fn(&mut VM, &[Value]) -> Result<Value, VMError>;
 
 #[derive(Clone, Debug)]
 pub enum Value {

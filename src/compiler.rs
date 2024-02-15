@@ -1,6 +1,5 @@
-use std::{collections::HashMap, io::{self, Write}};
-
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value, NativeFn}, vm::VMError, object::Function};
+use std::{collections::HashMap, io::{self, Write}, sync::{Mutex, Once}, time::{Duration, Instant}};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenKind}, value::{Number, Value, NativeFn}, vm::{VM, VMError}, object::Function};
 
 pub struct Globals {
     pub globals: Vec<Option<Value>>,
@@ -151,6 +150,93 @@ impl<'a> Compiler<'a> {
             had_error: false,
             panic_mode: false,
         };
+        macro_rules! native_with_arity {
+            ($name:expr, $arity:expr, $func:expr) => {
+                instance.globals.define_native($name, |vm, args| {
+                    if args.len() != $arity {
+                        vm.runtime_error(
+                            &format!("Expected {} arguments but got {}.", $arity, args.len())
+                        )?;
+                    }
+                    #[allow(clippy::redundant_closure_call)]
+                    {
+                        $func(vm, args)
+                    }
+                });
+            };
+        }
+        unsafe {
+            native_with_arity!("clock", 0, |_vm, _args| {
+                static ONCE: Once = Once::new();
+                static mut START_TIME: Option<Mutex<Instant>> = None;
+                ONCE.call_once(|| {
+                    START_TIME = Some(Mutex::new(Instant::now()));
+                });
+                Ok(Value::Num(Number::Int(START_TIME.as_ref().unwrap().lock().unwrap().elapsed().as_millis() as i64)))
+            });
+            native_with_arity!("sleep", 1, |vm: &mut VM, args: &[Value]| {
+                match &args[0] {
+                    Value::Num(Number::Int(i)) => {std::thread::sleep(Duration::from_millis(*i as u64)); Ok(Value::Nul)},
+                    _ => vm.runtime_value_error("Expected a number as argument."),
+                }
+            });
+            native_with_arity!("zepto", 1, |vm: &mut VM, args: &[Value]| {
+                match args[0] {
+                    Value::Num(n) => Ok(Value::Num(n * Number::Float(f64::powf(10.0, -21.0)))),
+                    _ => vm.runtime_value_error("Expected a number."),
+                }
+            });
+            native_with_arity!("input", 1, |vm: &mut VM, args: &[Value]| {
+                print!("{}", args[0]);
+                io::stdout().flush().unwrap();
+                let mut input= String::new();
+                if io::stdin().read_line(&mut input).is_err() {
+                    vm.runtime_value_error("Error while reading input.")?;
+                }
+                Ok(Value::Str(Box::new(input.trim().to_string())))
+            });
+            native_with_arity!("int", 1, |vm: &mut VM, args: &[Value]| {
+                match &args[0] {
+                    Value::Num(n) => match n {
+                        Number::Int(i) => Ok(Value::Num(Number::Int(*i))),
+                        Number::Float(f) => Ok(Value::Num(Number::Int(*f as i64))),
+                    },
+                    Value::Str(s) => Ok(Value::Num(Number::Int((*s).parse().unwrap()))),
+                    Value::Bool(b) => Ok(Value::Num(Number::Int(*b as i64))),
+                    _ => vm.runtime_value_error("Expected a number, string or boolean."),
+                }
+            });
+            native_with_arity!("float", 1, |vm: &mut VM, args: &[Value]| {
+                match &args[0] {
+                    Value::Num(n) => match n {
+                        Number::Int(i) => Ok(Value::Num(Number::Float(*i as f64))),
+                        Number::Float(f) => Ok(Value::Num(Number::Float(*f))),
+                    },
+                    Value::Str(s) => Ok(Value::Num(Number::Float((*s).parse().unwrap()))),
+                    Value::Bool(b) => Ok(Value::Num(Number::Float(*b as i64 as f64))),
+                    _ => vm.runtime_value_error("Expected a number, string or boolean."),
+                }
+            });
+            native_with_arity!("bool", 1, |_vm: &mut VM, args: &[Value]| {
+                Ok(Value::Bool(args[0].as_bool()))
+            });
+        }
+        
+        instance.globals.define_native("print", |_vm: &mut VM, args: &[Value]| {
+            for arg in args {
+                print!("{}", arg);
+            }
+            println!();
+            Ok(Value::Nul)
+        });
+        instance.globals.define_native("format", |_vm: &mut VM, args: &[Value]| {
+            let mut value = String::new();
+            for arg in args {
+                value.push_str(&format!("{}", arg));
+            }
+            Ok(Value::Str(Box::new(value)))
+        });
+
 
         instance
     }
@@ -287,7 +373,6 @@ impl<'a> Compiler<'a> {
     }
     fn statement(&mut self) {
         match self.current.kind.clone() {
-            TokenKind::Print => {self.advance(); self.print_statement()},
             TokenKind::LBrace => {self.advance(); self.scoped_block()},
             TokenKind::If => {self.advance(); self.if_statement()},
             TokenKind::While => {self.advance(); self.while_statement()},
@@ -319,11 +404,6 @@ impl<'a> Compiler<'a> {
         self.expression();
         self.consume(TokenKind::Semicolon, "Expected ';' after expression.");
         self.emit_byte(OpCode::POP);
-    }
-    fn print_statement(&mut self) {
-        self.expression();
-        self.consume(TokenKind::Semicolon, "Expected ';' at end of print statement.");
-        self.emit_byte(OpCode::PRINT);
     }
     fn let_declaration(&mut self) {
         let id = self.parse_variable("Expected variable name.");
@@ -817,7 +897,7 @@ impl<'a> Compiler<'a> {
         while self.current.kind != TokenKind::EOF {
             if self.previous.kind == TokenKind::Semicolon {return;}
             match self.current.kind {
-                TokenKind::Print | TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords
+                TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords
                 _ => self.advance(),
             }
         }
