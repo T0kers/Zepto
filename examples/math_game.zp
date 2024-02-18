@@ -1,0 +1,24 @@
+
+fn math_game(min, max) {
+    let a = random(min, max);
+    let b = random(min, max);
+    print("Calculate the answer:");
+
+    let is_correct = false;
+    while !is_correct {
+        let answer = input(format(a, " + ", b, " = "));
+        if int(answer) == a + b {
+            print("That is correct!");
+            is_correct = true;
+        }
+        else {
+            print("That is wrong! Try again:");
+        }
+    }
+}
+
+fn main() {
+    for let i = 0; i < 2; i = i + 1 {
+        math_game(20, 100);
+    }
+}

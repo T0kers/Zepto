@@ -1,0 +1,15 @@
+
+// this code is intended to be slow
+
+fn fib(n) {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() {
+    let start = clock();
+    print("Result: ", fib(35));
+    print("Time: ", clock() - start);
+}

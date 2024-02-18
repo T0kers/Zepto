@@ -1,0 +1,13 @@
+
+
+class Animal {
+    fn init() {
+        self.sound = "Moo";
+    }
+    fn say() {
+        print(self.sound);
+    }
+}
+
+let a1 = Animal();
+a1.say();

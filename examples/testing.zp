@@ -1,0 +1,13 @@
+
+
+let x = "global";
+fn outer() {
+  let x = "outer";
+  fn() {
+    print(x);
+  }();
+}
+
+fn main() {
+    outer();
+}

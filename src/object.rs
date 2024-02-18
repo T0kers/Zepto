@@ -10,3 +10,14 @@ impl Function {
         Self {arity, start}
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Closure {
+    pub function: Function,
+}
+
+impl Closure {
+    pub fn new(function: Function) -> Self {
+        Self {function}
+    }
+}

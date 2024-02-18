@@ -1,5 +1,5 @@
 use std::{fmt, ops, cmp::Ordering};
-use crate::{object::Function, vm::{VM, VMError}};
+use crate::{object::{Function, Closure}, vm::VM, errors::VMError};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Number {
@@ -164,6 +164,7 @@ pub type NativeFn = fn(&mut VM, &[Value]) -> Result<Value, VMError>;
 pub enum Value {
     Str(Box<String>),
     Fn(Box<Function>),
+    Closure(Box<Closure>),
     NativeFn(NativeFn),
     Num(Number),
     Bool(bool),
@@ -175,6 +176,7 @@ impl Value {
         match self {
             Value::Str(s) => !(**s).is_empty(),
             Value::Fn(_) => true,
+            Value::Closure(_) => true,
             Value::NativeFn(_) => true,
             Value::Num(n) => n.as_bool(),
             Value::Bool(b) => *b,
@@ -188,6 +190,7 @@ impl fmt::Display for Value {
         match self {
             Value::Str(s) => write!(f, "{}", s),
             Value::Fn(_) => write!(f, "<Function>"),
+            Value::Closure(_) => write!(f, "<Closure>"),
             Value::NativeFn(_) => write!(f, "<Native>"),
             Value::Num(i) => write!(f, "{}", i),
             Value::Bool(b) => write!(f, "{}", b),

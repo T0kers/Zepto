@@ -1,5 +1,4 @@
-use crate::value::Value;
-use std::num::TryFromIntError;
+use crate::{value::Value, errors::VMError};
 
 macro_rules! generate_opcode {
     ($n:expr;) => {};
@@ -19,7 +18,7 @@ macro_rules! generate_opcode {
 
 
 generate_opcode!(
-    CONSTANT, CONSTANT_LONG,
+    CONSTANT, CONSTANT_LONG, CLOSURE_LONG,
     TRUE, FALSE, BOOL, NUL,
     ADD, SUB, MUL, DIV, REM, UMINUS,
     BITOR, BITXOR, BITAND,
@@ -58,11 +57,14 @@ impl Chunk {
         self.code.push(opcode);
         self.add_line(line);
     }
-    pub fn add_constant(&mut self, value: Value) -> Result<u16, TryFromIntError> {
+    pub fn add_constant(&mut self, value: Value) -> Result<u16, VMError> {
         self.constants.push(value);
-        (self.constants.len() - 1).try_into()
+        match (self.constants.len() - 1).try_into() {
+            Ok(index) => Ok(index),
+            Err(_) => Err(VMError::compile_error("Too many constants defined.")),
+        }
     }
-    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), TryFromIntError> {
+    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), VMError> {
         let index: u16 = self.add_constant(value)?;
         if index > (u8::MAX as u16) {
             self.add_opcode(OpCode::CONSTANT_LONG, line);
@@ -77,7 +79,6 @@ impl Chunk {
         }
         Ok(())
     }
-
     pub fn line(&self, i: usize) -> u32 {
         let mut current_line: u32 = 0;
         for l in &self.lines {

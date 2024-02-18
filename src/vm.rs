@@ -1,11 +1,6 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::Closure, errors::VMError};
 use std::ptr;
 
-
-pub enum VMError {
-    CompileError,
-    RuntimeError,
-}
 
 struct CallInfo {
     return_address: *const u8,
@@ -224,10 +219,16 @@ impl<'a> VM<'a> {
                         self.push(constant);
                     }
                     OpCode::CONSTANT_LONG => {
-                        let mut index = self.read_byte() as usize;
-                        index = index << 8 | self.read_byte() as usize;
-                        let constant = self.chunk.constants[index].clone();
+                        let constant = self.chunk.constants[self.read_bytes() as usize].clone();
                         self.push(constant);
+                    }
+                    OpCode::CLOSURE_LONG => {
+                        if let Value::Fn(f) = self.chunk.constants[self.read_bytes() as usize].clone() { // TODO: change so no runtime check is used.
+                            self.push(Value::Closure(Box::new(Closure::new(*f))));
+                        }
+                        else {
+                            self.runtime_error("This error should never happen, unless my code is wrong!")?;
+                        }
                     }
                     OpCode::TRUE => self.push(Value::Bool(true)),
                     OpCode::FALSE => self.push(Value::Bool(false)),
@@ -354,6 +355,16 @@ impl<'a> VM<'a> {
                                 self.call_stack_ptr = self.call_stack_ptr.add(1);
                                 self.ip = self.chunk.code.as_ptr().add(f.start);
                             }
+                            Value::Closure(f) => {
+                                if f.function.arity as usize != arguments {
+                                    self.runtime_error(
+                                        &format!("Expected {} arguments but got {}.", f.function.arity, arguments)
+                                    )?;
+                                }
+                                (*self.call_stack_ptr).set(self.ip, self.stack_top.offset_from(self.stack.as_ptr()) as usize - f.function.arity as usize);
+                                self.call_stack_ptr = self.call_stack_ptr.add(1);
+                                self.ip = self.chunk.code.as_ptr().add(f.function.start);
+                            }
                             Value::NativeFn(n) => {
                                 let result = n(self, std::slice::from_raw_parts(self.stack_top.sub(arguments), arguments))?;
                                 self.stack_top = self.stack_top.sub(arguments + 1);
@@ -391,16 +402,12 @@ impl<'a> VM<'a> {
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
-        eprintln!("{}", msg);
-        eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
         self.reset_stack();
-        Err(VMError::RuntimeError)
+        Err(VMError::runtime_error(format!("{} [Line {}] in script.", msg, self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize))))
     }
 
     pub unsafe fn runtime_value_error(&mut self, msg: &str) -> Result<Value, VMError> { // TODO: this function should maybe be turned into a macro.
-        eprintln!("{}", msg);
-        eprintln!("[Line {}] in script.", self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize));
         self.reset_stack();
-        Err(VMError::RuntimeError)
+        Err(VMError::runtime_error(format!("{} [Line {}] in script.", msg, self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize))))
     }
 }

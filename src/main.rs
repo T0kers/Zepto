@@ -8,8 +8,8 @@ pub mod interpreter;
 pub mod compiler;
 pub mod scanner;
 pub mod object;
+pub mod errors;
 
-use vm::VMError;
 use value::Value;
 use std::{env, fs, io::{self, Write}};
 
@@ -43,22 +43,22 @@ fn repl() {
         }
         match interpreter::interpret(&line) {
             Ok(_) => {},
-            Err(e) => match e {
-                VMError::CompileError => println!("Error when compiling!"),
-                VMError::RuntimeError => println!("Runtime error ocurred!"),
-            }
+            Err(e) => eprintln!("{}", e)
         }
     }
 }
 
 fn run_file(path: &str) {
-    let source = fs::read_to_string(path).expect("Unable to read file.");
+    let source = match fs::read_to_string(path) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Unable to read file: {}", e);
+            return;
+        }
+    };
 
     match interpreter::interpret(&source) {
         Ok(v) => println!("Program exited succesfully with value: {}", v),
-        Err(e) => match e {
-            VMError::CompileError => println!("Error when compiling!"),
-            VMError::RuntimeError => println!("Runtime error ocurred!"),
-        }
+        Err(e) => eprintln!("{}", e),
     }
 }
