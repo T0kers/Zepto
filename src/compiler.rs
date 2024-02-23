@@ -67,63 +67,144 @@ impl ScopeInfo {
     }
 }
 
-pub enum LocalError {
-    Overflow,
-    DuplicateName,
+struct Upvalue {
+    index: u8,
+    is_local: bool,
 }
 
-pub struct Locals {
-    next_index: u8,
-    info: Vec<ScopeInfo>,
+impl Upvalue {
+    pub fn new(index: u8, is_local: bool) -> Self {
+        Self {index, is_local}
+    }
 }
 
-impl Locals {
+struct FunctionInfo {
+    scopes: Vec<ScopeInfo>,
+    upvalues: Vec<Upvalue>,
+    upvalue_count: u8,
+    next_local: u8,
+}
+
+impl FunctionInfo {
     pub fn new() -> Self {
         Self {
-            next_index: 0,
-            info: vec![],
+            scopes: vec![],
+            upvalues: vec![],
+            upvalue_count: 0,
+            next_local: 0,
         }
     }
-    pub fn begin_scope(&mut self) {
-        self.info.push(ScopeInfo::new());
-    }
-    pub fn end_scope(&mut self) -> u8 {
-        let count = self.info.pop().unwrap().count;
-        self.next_index -= count;
-        count
-    }
-    pub fn register_local(&mut self, name: &str) -> Result<(), LocalError> {
-        let current_scope = self.info.last_mut().unwrap();
-        if current_scope.indexes.get(name).is_some() {
-            return Err(LocalError::DuplicateName);
+    pub fn add_upvalue(&mut self, index: u8, is_local: bool) -> Result<u8, VMError> {
+        let upvalue_index = self.upvalue_count;
+        for i in 0..upvalue_index {
+            let upvalue = &mut self.upvalues[i as usize];
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return Ok(i);
+            }
         }
-        current_scope.not_initialized = name.to_string();
-        if self.next_index < u8::MAX { // IMPORTANT TODO: also check if there is space for tempoaries.
-            current_scope.count += 1;
-            self.next_index += 1;
+        if let Some(incr) = self.upvalue_count.checked_add(1) {
+            self.upvalue_count = incr;
         }
         else {
-            return Err(LocalError::Overflow);
+            Err(VMError::compile_error("Too many captured variables in function."))?;
         }
-        Ok(())
-    }
-    pub fn mark_as_initialized(&mut self) {
-        let current_scope = self.info.last_mut().unwrap();
-        let not_initialized = std::mem::take(&mut current_scope.not_initialized);
-        current_scope.indexes.insert(not_initialized, self.next_index - 1);
+        self.upvalues.push(Upvalue::new(index, is_local));
+        
+        Ok(upvalue_index)
     }
     pub fn get_index(&self, name: &str) -> Option<u8> {
-        for i in 1..(self.depth() + 1) {
-            let check_scope = &self.info[self.depth() - i];
+        for i in 1..=self.scopes.len() {
+            let check_scope = &self.scopes[self.scopes.len() - i];
             if let Some(index) = check_scope.indexes.get(name) {
                 return Some(*index);
             }
         }
         None
     }
+}
 
-    pub fn depth(&self) -> usize {
-        self.info.len()
+pub struct Locals {
+    functions_info: Vec<FunctionInfo>,
+}
+
+impl Locals {
+    pub fn new() -> Self {
+        Self {
+            functions_info: vec![],
+        }
+    }
+    pub fn begin_function(&mut self) {
+        self.functions_info.push(FunctionInfo::new());
+        self.current_function_mut().scopes.push(ScopeInfo::new());
+    }
+    pub fn end_function(&mut self) {
+        self.end_scope();
+        if !self.current_function().scopes.is_empty() {
+            panic!("Error in code: Scope was not empty, when trying to end function.");
+        }
+        self.functions_info.pop();
+    }
+    pub fn begin_scope(&mut self) {
+        self.functions_info.last_mut().unwrap().scopes.push(ScopeInfo::new());
+    }
+    pub fn end_scope(&mut self) -> u8 {
+        let count = self.current_function_mut().scopes.pop().unwrap().count;
+        self.current_function_mut().next_local -= count;
+        count
+    }
+    fn current_function(&self) -> &FunctionInfo {
+        self.functions_info.last().unwrap()
+    }
+    fn current_function_mut(&mut self) -> &mut FunctionInfo {
+        self.functions_info.last_mut().unwrap()
+    }
+    fn current_scope_mut(&mut self) -> &mut ScopeInfo {
+        self.current_function_mut().scopes.last_mut().unwrap()
+    }
+    pub fn register_local(&mut self, name: &str) -> Result<(), VMError> {
+        let next_index = self.current_function_mut().next_local;
+        let current_scope = self.current_scope_mut();
+        if current_scope.indexes.get(name).is_some() {
+            return Err(VMError::compile_error("A variable with the same name already exists."));
+        }
+        current_scope.not_initialized = name.to_string();
+        if next_index < u8::MAX { // IMPORTANT TODO: also check if there is space for tempoaries.
+            current_scope.count += 1;
+            self.current_function_mut().next_local += 1;
+        }
+        else {
+            return Err(VMError::compile_error("Too many local variables declared."));
+        }
+        Ok(())
+    }
+    pub fn mark_as_initialized(&mut self) {
+        let next_index = self.current_function_mut().next_local;
+        let current_scope = self.current_scope_mut();
+        let not_initialized = std::mem::take(&mut current_scope.not_initialized);
+        current_scope.indexes.insert(not_initialized, next_index - 1);
+    }
+    pub fn get_local(&self, name: &str) -> Option<u8> {
+        self.current_function().get_index(name)
+    }
+    pub fn resolve_upvalue(&mut self, name: &str) -> Result<Option<u8>, VMError> {
+        self.get_upvalue(name, 1)
+    }
+    pub fn get_upvalue(&mut self, name: &str, depth: usize) -> Result<Option<u8>, VMError> {
+        if self.function_depth() < depth + 1 {
+            return Ok(None);
+        }
+        let index = self.function_depth() - depth;
+        let enclosing_index = self.function_depth() - depth - 1;
+        if let Some(local) = self.functions_info[enclosing_index].get_index(name) {
+            return Ok(Some(self.functions_info[index].add_upvalue(local, true)?));
+        }
+        if let Some(upvalue) = self.get_upvalue(name, depth + 1)? {
+            return Ok(Some(self.functions_info[index].add_upvalue(upvalue, false)?));
+        }
+        Ok(None)
+    }
+    pub fn function_depth(&self) -> usize {
+        self.functions_info.len()
     }
 }
 
@@ -451,7 +532,7 @@ impl<'a> Compiler<'a> {
 
         self.consume(TokenKind::LParen, "Expected '(' after function name.")?;
 
-        self.begin_scope();
+        self.begin_function();
 
         let mut parameter_count: u16 = 0;
         if self.check(TokenKind::Identifier) {
@@ -482,12 +563,15 @@ impl<'a> Compiler<'a> {
         
         self.emit_bytes(OpCode::NUL, OpCode::RETURN);
 
-        self.end_scope_no_emit();
+        self.end_function();
 
         self.globals.define_id(id, Value::Fn(Box::new(Function::new(parameter_count, fn_start))));
 
         self.patch_jump(skip_function)?;
         Ok(())
+    }
+    fn begin_function(&mut self) {
+        self.locals.begin_function();
     }
     fn begin_scope(&mut self) {
         self.locals.begin_scope();
@@ -516,8 +600,8 @@ impl<'a> Compiler<'a> {
             self.emit_bytes(OpCode::POP_SCOPE, amount);
         }
     }
-    fn end_scope_no_emit(&mut self) {
-        self.locals.end_scope();
+    fn end_function(&mut self) {
+        self.locals.end_function();
     }
     fn if_statement(&mut self) -> Result<(), VMError> {
         self.expression()?;
@@ -617,21 +701,16 @@ impl<'a> Compiler<'a> {
         self.consume(TokenKind::Identifier, msg)?;
 
         self.declare_variable()?;
-        if self.locals.depth() > 0 {
+        if self.locals.function_depth() > 0 {
             return Ok(0);
         }
         self.globals.create_or_get_id(self.previous.lexeme(self.scanner.source))
     }
     fn declare_variable(&mut self) -> Result<(), VMError> {
-        if self.locals.depth() == 0 {
+        if self.locals.function_depth() == 0 {
             return Ok(());
         }
-        if let Err(e) = self.locals.register_local(self.previous.lexeme(self.scanner.source)) {
-            match e {
-                LocalError::Overflow => return self.error("Too many local variables declared."),
-                LocalError::DuplicateName => return self.error("A variable with the same name already exists."),
-            }
-        }
+        self.locals.register_local(self.previous.lexeme(self.scanner.source))?;
         Ok(())
     }
     fn expression(&mut self) -> Result<(), VMError> {
@@ -759,15 +838,13 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
     fn closure(&mut self) -> Result<(), VMError> {
-        let index = self.emit_closure();
-
         let skip_closure = self.emit_jump(OpCode::JUMP);
 
         let fn_start = self.current_chunk().code.len();
 
         self.consume(TokenKind::LParen, "Expected '(' after function name.")?;
 
-        self.begin_scope();
+        self.begin_function();
 
         let mut parameter_count: u16 = 0;
         if self.check(TokenKind::Identifier) {
@@ -796,11 +873,11 @@ impl<'a> Compiler<'a> {
         
         self.emit_bytes(OpCode::NUL, OpCode::RETURN);
 
-        self.end_scope_no_emit();
-
-        self.patch_closure(index, Function::new(parameter_count as u8, fn_start))?;
-
         self.patch_jump(skip_closure)?;
+
+        self.emit_closure(Function::new(parameter_count as u8, fn_start))?;
+
+        self.end_function();
         Ok(())
     }
     fn emit_literal(&mut self) -> Result<(), VMError> {
@@ -818,7 +895,7 @@ impl<'a> Compiler<'a> {
         )))
     }
     fn emit_define_variable(&mut self, id: u16) {
-        if self.locals.depth() > 0 {
+        if self.locals.function_depth() > 0 {
             self.locals.mark_as_initialized();
             return;
         }
@@ -832,14 +909,28 @@ impl<'a> Compiler<'a> {
     }
     fn emit_variable(&mut self, can_assign: bool) -> Result<(), VMError> {
         let lexeme = self.previous.lexeme(self.scanner.source);
-        if self.locals.depth() > 0 {
-            if let Some(index) = self.locals.get_index(lexeme) {
+        if self.locals.function_depth() > 0 {
+            let mut set_op: u8 = 0xFF;
+            let mut get_op: u8 = 0xFF;
+            let mut index: Option<u8> = None;
+            if let Some(i) = self.locals.get_local(lexeme) {
+                index = Some(i);
+                set_op = OpCode::SET_LOCAL;
+                get_op = OpCode::GET_LOCAL;
+            }
+            else if let Some(i) = self.locals.resolve_upvalue(lexeme)? {
+                index = Some(i);
+                set_op = OpCode::SET_UPVALUE;
+                get_op = OpCode::GET_UPVALUE;
+            }
+            if index.is_some() {
+                let index = index.unwrap();
                 if can_assign && self.compare(TokenKind::Equal)? {
                     self.expression()?;
-                    self.emit_bytes(OpCode::SET_LOCAL, index);
+                    self.emit_bytes(set_op, index);
                 }
                 else {
-                    self.emit_bytes(OpCode::GET_LOCAL, index);
+                    self.emit_bytes(get_op, index);
                 }
                 return Ok(());
             }
@@ -868,15 +959,17 @@ impl<'a> Compiler<'a> {
         let prev_line = self.previous.line;
         self.current_chunk_mut().write_constant(value, prev_line)
     }
-    fn emit_closure(&mut self) -> usize {
+    fn emit_closure(&mut self, function: Function) -> Result<(), VMError> {
         self.emit_byte(OpCode::CLOSURE_LONG);
-        self.emit_bytes(0xFF, 0xFF);
-        self.current_chunk_mut().code.len() - 2
-    }
-    fn patch_closure(&mut self, offset: usize, function: Function) -> Result<(), VMError> {
         let index: u16 = self.current_chunk_mut().add_constant(Value::Fn(Box::new(function)))?;
-        self.current_chunk_mut().code[offset] = (index >> 8) as u8;
-        self.current_chunk_mut().code[offset + 1] = (index & 0xFF) as u8;
+        self.emit_bytes((index >> 8) as u8, (index & 0xFF) as u8);
+        self.emit_byte(self.locals.current_function().upvalue_count);
+        for i in 0..self.locals.current_function().upvalue_count as usize {
+            self.emit_bytes(
+                if self.locals.current_function().upvalues[i].is_local {1} else {0},
+                self.locals.current_function().upvalues[i].index
+            );
+        }
         Ok(())
     }
     fn emit_jump(&mut self, instruction: u8) -> usize {

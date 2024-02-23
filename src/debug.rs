@@ -10,6 +10,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
 }
 
 pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
+    let mut i = i;
     print!("{:04} ", i);
     if i > 0 && chunk.line(i) == chunk.line(i - 1) {
         print!("   | ");
@@ -20,7 +21,17 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
     match chunk.code[i] {
         OpCode::CONSTANT => constant_instruction("CONSTANT", chunk, i),
         OpCode::CONSTANT_LONG => constant_long_instruction("CONSTANT_LONG", chunk, i),
-        OpCode::CLOSURE_LONG => constant_long_instruction("CLOSURE_LONG", chunk, i),
+        OpCode::CLOSURE_LONG => {
+            i = constant_long_instruction("CLOSURE_LONG", chunk, i);
+            let iterations = chunk.code[i];
+            for _ in 0..iterations {
+                let is_local = chunk.code[i + 1];
+                let index = chunk.code[i + 2];
+                i += 2;
+                println!("{:04}      | {} {}", i, if is_local != 0 {"local"} else {"upvalue"}, index);
+            }
+            i + 1
+        },
         OpCode::TRUE => simple_instruction("TRUE", i),
         OpCode::FALSE => simple_instruction("FALSE", i),
         OpCode::BOOL => simple_instruction("BOOL", i),
@@ -47,6 +58,8 @@ pub fn disassemble_instruction(chunk: &Chunk, i: usize) -> usize {
         OpCode::GET_GLOBAL => variable_instruction("GET_GLOBAL", chunk, i),
         OpCode::GET_GLOBAL_LONG => variable_instruction_long("GET_GLOBAL_LONG", chunk, i),
         OpCode::GET_LOCAL => variable_instruction("GET_LOCAL", chunk, i),
+        OpCode::SET_UPVALUE => variable_instruction("SET_UPVALUE", chunk, i),
+        OpCode::GET_UPVALUE => variable_instruction("GET_UPVALUE", chunk, i),
         OpCode::GREATER => simple_instruction("GREATER", i),
         OpCode::NOT => simple_instruction("NOT", i),
         OpCode::POP => simple_instruction("POP", i),

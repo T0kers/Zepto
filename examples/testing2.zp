@@ -1,0 +1,16 @@
+
+
+fn outer() {
+    let a = 1;
+    fn() {
+        fn() {
+            fn() {
+                print(a);
+            };
+        };  
+    };  
+}
+
+fn main() {
+
+}

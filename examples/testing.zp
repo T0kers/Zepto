@@ -1,13 +1,17 @@
 
 
-let x = "global";
 fn outer() {
-  let x = "outer";
+  let a = 1;
+  let b = 2;
   fn() {
-    print(x);
-  }();
+    let c = 3;
+    let d = 4;
+    fn() {
+      print(a + c + b + d);
+    };
+  };
 }
 
 fn main() {
-    outer();
+
 }
