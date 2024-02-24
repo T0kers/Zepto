@@ -4,6 +4,7 @@ class Animal {
     fn init() {
         self.sound = "Moo";
     }
+    let shared = "this variable should be shared between all instances.";
     fn say() {
         print(self.sound);
     }

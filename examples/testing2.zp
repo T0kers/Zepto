@@ -1,16 +1,12 @@
 
-
 fn outer() {
-    let a = 1;
-    fn() {
-        fn() {
-            fn() {
-                print(a);
-            };
-        };  
-    };  
+  let x = "outside";
+  return fn() {
+    print(x);
+  };
 }
 
 fn main() {
-
+    let closure = outer();
+    closure();
 }

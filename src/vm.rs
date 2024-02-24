@@ -1,4 +1,4 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::Closure, errors::VMError};
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::{Closure, UpValue}, errors::VMError};
 use std::ptr;
 
 
@@ -222,14 +222,6 @@ impl<'a> VM<'a> {
                         let constant = self.chunk.constants[self.read_bytes() as usize].clone();
                         self.push(constant);
                     }
-                    OpCode::CLOSURE_LONG => {
-                        if let Value::Fn(f) = self.chunk.constants[self.read_bytes() as usize].clone() { // TODO: change so no runtime check is used.
-                            self.push(Value::Closure(Box::new(Closure::new(*f))));
-                        }
-                        else {
-                            self.runtime_error("This error should never happen, unless my code is wrong!")?;
-                        }
-                    }
                     OpCode::TRUE => self.push(Value::Bool(true)),
                     OpCode::FALSE => self.push(Value::Bool(false)),
                     OpCode::BOOL => {
@@ -305,6 +297,52 @@ impl<'a> VM<'a> {
                     OpCode::GET_LOCAL => {
                         let index = self.read_byte() as usize + (*self.call_stack_ptr.sub(1)).stack_offset;
                         self.push(self.stack[index].clone());
+                    }
+                    OpCode::SET_UPVALUE => {
+                        let slot = self.read_byte() as usize;
+                        if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
+                            self.stack[c.upvalues[slot].location] = self.peek(0);
+                        }
+                        else {
+                            panic!("This error should only occur if Tokers has made anything wrong!");
+                        }
+                    },
+                    OpCode::GET_UPVALUE => {
+                        let slot = self.read_byte() as usize;
+                        if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
+                            self.push(self.stack[c.upvalues[slot].location].clone());
+                        }
+                        else {
+                            panic!("This error should only occur if Tokers has made anything wrong!");
+                        }
+                    },
+                    OpCode::CLOSURE_LONG => {
+                        if let Value::Fn(f) = self.chunk.constants[self.read_bytes() as usize].clone() { // TODO: change so no runtime check is used.
+                            let upvalue_count = self.read_byte() as usize;
+                            let mut closure = Closure::new(*f, upvalue_count);
+                            for i in 0..upvalue_count {
+                                let is_local = self.read_byte();
+                                let index = self.read_byte() as usize;
+
+                                if is_local != 0 {
+                                    closure.upvalues[i] = self.capture_upvalue((*self.call_stack_ptr.sub(1)).stack_offset + index);
+                                }
+                                else {
+                                    closure.upvalues[i] = {
+                                        if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
+                                            c.upvalues[index].clone()
+                                        }
+                                        else {
+                                            panic!("This error should only occur if Tokers has made anything wrong!");
+                                        }
+                                    }
+                                }
+                            }
+                            self.push(Value::Closure(Box::new(closure)));
+                        }
+                        else {
+                            self.runtime_error("This error should never happen, unless my code is wrong!")?;
+                        }
                     }
                     OpCode::POP => {self.pop();},
                     OpCode::POP_SCOPE => {
@@ -399,6 +437,11 @@ impl<'a> VM<'a> {
     }
     unsafe fn peek(&mut self, distance: usize) -> Value {
         (*self.stack_top.sub(1 + distance)).clone()
+    }
+
+    fn capture_upvalue(&self, local: usize) -> UpValue {
+        let created_upvalue = UpValue::new(local);
+        created_upvalue
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.

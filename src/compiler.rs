@@ -51,9 +51,23 @@ impl Default for Globals {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Local {
+    index: u8,
+    is_captured: bool,
+}
+
+impl Local {
+    pub fn new(index: u8) -> Self {
+        Self {
+            index, is_captured: false,
+        }
+    }
+}
+
 struct ScopeInfo {
     count: u8,
-    indexes: HashMap<String, u8>,
+    indexes: HashMap<String, Local>,
     not_initialized: String,
 }
 
@@ -112,11 +126,29 @@ impl FunctionInfo {
         
         Ok(upvalue_index)
     }
-    pub fn get_index(&self, name: &str) -> Option<u8> {
+    fn get_scope_offset(&self, name: &str) -> Option<usize> {
+        for i in 1..=self.scopes.len() {
+            let check_scope = &self.scopes[self.scopes.len() - i];
+            if check_scope.indexes.get(name).is_some() {
+                return Some(i);
+            }
+        }
+        None
+    }
+    pub fn get_local_mut(&mut self, name: &str) -> Option<&mut Local> {
+        if let Some(i) = self.get_scope_offset(name) {
+            let scope_len = self.scopes.len();
+            if let Some(local) = self.scopes[scope_len - i].indexes.get_mut(name) {
+                return Some(local);
+            }
+        }
+        None
+    }
+    pub fn get_local(&self, name: &str) -> Option<&Local> {
         for i in 1..=self.scopes.len() {
             let check_scope = &self.scopes[self.scopes.len() - i];
             if let Some(index) = check_scope.indexes.get(name) {
-                return Some(*index);
+                return Some(index);
             }
         }
         None
@@ -181,10 +213,10 @@ impl Locals {
         let next_index = self.current_function_mut().next_local;
         let current_scope = self.current_scope_mut();
         let not_initialized = std::mem::take(&mut current_scope.not_initialized);
-        current_scope.indexes.insert(not_initialized, next_index - 1);
+        current_scope.indexes.insert(not_initialized, Local::new(next_index - 1));
     }
-    pub fn get_local(&self, name: &str) -> Option<u8> {
-        self.current_function().get_index(name)
+    pub fn get_local(&self, name: &str) -> Option<&Local> {
+        self.current_function().get_local(name)
     }
     pub fn resolve_upvalue(&mut self, name: &str) -> Result<Option<u8>, VMError> {
         self.get_upvalue(name, 1)
@@ -195,8 +227,10 @@ impl Locals {
         }
         let index = self.function_depth() - depth;
         let enclosing_index = self.function_depth() - depth - 1;
-        if let Some(local) = self.functions_info[enclosing_index].get_index(name) {
-            return Ok(Some(self.functions_info[index].add_upvalue(local, true)?));
+        if let Some(local) = self.functions_info[enclosing_index].get_local_mut(name) {
+            local.is_captured = true;
+            let local_index = local.index;
+            return Ok(Some(self.functions_info[index].add_upvalue(local_index, true)?));
         }
         if let Some(upvalue) = self.get_upvalue(name, depth + 1)? {
             return Ok(Some(self.functions_info[index].add_upvalue(upvalue, false)?));
@@ -914,7 +948,7 @@ impl<'a> Compiler<'a> {
             let mut get_op: u8 = 0xFF;
             let mut index: Option<u8> = None;
             if let Some(i) = self.locals.get_local(lexeme) {
-                index = Some(i);
+                index = Some(i.index);
                 set_op = OpCode::SET_LOCAL;
                 get_op = OpCode::GET_LOCAL;
             }

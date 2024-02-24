@@ -8,10 +8,10 @@ fn outer() {
     let d = 4;
     fn() {
       print(a + c + b + d);
-    };
-  };
+    }();
+  }();
 }
 
 fn main() {
-
+  outer();
 }
