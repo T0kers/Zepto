@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::{self, Write}, sync::{Mutex, Once}, time::{Duration, Instant}};
-use crate::{chunk::{Chunk, OpCode}, errors::VMError, object::Function, scanner::{Scanner, Token, TokenKind}, value::{NativeFn, Number, Value}, vm::VM};
+use crate::{chunk::{Chunk, OpCode}, errors::VMError, object::{Function, UpValueLocation}, scanner::{Scanner, Token, TokenKind}, value::{NativeFn, Number, Value}, vm::VM};
 use rand::Rng;
+use indexmap::IndexMap;
 
 pub struct Globals {
     pub globals: Vec<Option<Value>>,
@@ -51,7 +52,7 @@ impl Default for Globals {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Local {
     index: u8,
     is_captured: bool,
@@ -67,7 +68,7 @@ impl Local {
 
 struct ScopeInfo {
     count: u8,
-    indexes: HashMap<String, Local>,
+    indexes: IndexMap<String, Local>,
     not_initialized: String,
 }
 
@@ -75,18 +76,18 @@ impl ScopeInfo {
     pub fn new() -> Self {
         Self {
             count: 0,
-            indexes: HashMap::new(),
+            indexes: IndexMap::new(),
             not_initialized: String::new(),
         }
     }
 }
 
-struct Upvalue {
+struct UpValueInfo {
     index: u8,
     is_local: bool,
 }
 
-impl Upvalue {
+impl UpValueInfo {
     pub fn new(index: u8, is_local: bool) -> Self {
         Self {index, is_local}
     }
@@ -94,7 +95,7 @@ impl Upvalue {
 
 struct FunctionInfo {
     scopes: Vec<ScopeInfo>,
-    upvalues: Vec<Upvalue>,
+    upvalues: Vec<UpValueInfo>,
     upvalue_count: u8,
     next_local: u8,
 }
@@ -122,7 +123,7 @@ impl FunctionInfo {
         else {
             Err(VMError::compile_error("Too many captured variables in function."))?;
         }
-        self.upvalues.push(Upvalue::new(index, is_local));
+        self.upvalues.push(UpValueInfo::new(index, is_local));
         
         Ok(upvalue_index)
     }
@@ -179,10 +180,34 @@ impl Locals {
     pub fn begin_scope(&mut self) {
         self.functions_info.last_mut().unwrap().scopes.push(ScopeInfo::new());
     }
-    pub fn end_scope(&mut self) -> u8 {
-        let count = self.current_function_mut().scopes.pop().unwrap().count;
-        self.current_function_mut().next_local -= count;
-        count
+
+    // returns a vector with the amount of locals followed by the amount of upvalues, and then repeating.
+    pub fn end_scope(&mut self) -> Vec<u8> { 
+        let mut scope_info = self.current_function_mut().scopes.pop().unwrap();
+        scope_info.indexes.reverse();
+        self.current_function_mut().next_local -= scope_info.count;
+        let mut result = vec![0];
+        println!("------------------");
+        for (k, local) in &scope_info.indexes {
+            println!("{} {:?}", k, local);
+            if result.len() % 2 == 0 {
+                if local.is_captured {
+                    *result.last_mut().unwrap() += 1;
+                }
+                else {
+                    result.push(1);
+                }
+            }
+            else if local.is_captured {
+                result.push(1);
+            }
+            else {
+                *result.last_mut().unwrap() += 1;
+            }
+        }
+        println!("********************");
+        println!("{:?}", result);
+        result
     }
     fn current_function(&self) -> &FunctionInfo {
         self.functions_info.last().unwrap()
@@ -597,9 +622,10 @@ impl<'a> Compiler<'a> {
         
         self.emit_bytes(OpCode::NUL, OpCode::RETURN);
 
+        self.globals.define_id(id, Value::Fn(Box::new(Function::new(parameter_count, fn_start))));
+        
         self.end_function();
 
-        self.globals.define_id(id, Value::Fn(Box::new(Function::new(parameter_count, fn_start))));
 
         self.patch_jump(skip_function)?;
         Ok(())
@@ -626,12 +652,25 @@ impl<'a> Compiler<'a> {
         self.consume(TokenKind::RBrace, "Expected '}' after block.")
     }
     fn end_scope(&mut self) {
-        let amount = self.locals.end_scope();
-        if amount == 1 {
-            self.emit_byte(OpCode::POP);
-        }
-        if amount > 1 {
-            self.emit_bytes(OpCode::POP_SCOPE, amount);
+        let info = self.locals.end_scope();
+        for (i, amount) in info.iter().enumerate() {
+            println!("i: {}", i);
+            if i % 2 == 0 {
+                if *amount > 2 {
+                    self.emit_bytes(OpCode::POP_SCOPE, *amount);
+                }
+                else {
+                    for _ in 0..*amount { // will run through loop zero, one or two times.
+                        self.emit_byte(OpCode::POP);
+                    }
+                }
+            }
+            else {
+                for _ in 0..*amount {
+                    println!("aqsdasdfadsdsa");
+                    self.emit_byte(OpCode::CLOSE_UPVALUE);
+                }
+            }
         }
     }
     fn end_function(&mut self) {

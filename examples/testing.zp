@@ -1,17 +1,21 @@
 
+let globalSet;
+let globalGet;
 
-fn outer() {
-  let a = 1;
-  let b = 2;
-  fn() {
-    let c = 3;
-    let d = 4;
-    fn() {
-      print(a + c + b + d);
-    }();
-  }();
+fn run() {
+  {
+    let a = "initial";
+    let c = "yeee";
+
+    globalSet = fn() { a = "updated"; };
+    globalGet = fn() { print(a); };
+  }
+  let b = "hmmm!";
 }
 
 fn main() {
-  outer();
+  run();
+  globalGet();
+  globalSet();
+  globalGet();
 }

@@ -1,10 +1,11 @@
-use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::{Closure, UpValue}, errors::VMError};
-use std::ptr;
+use crate::{chunk::{Chunk, OpCode}, value::{Value, Number}, object::{Closure, UpValueLocation, UpValue}, errors::VMError};
+use std::{ptr, vec};
 
 
 struct CallInfo {
     return_address: *const u8,
     stack_offset: usize,
+    locals_to_capture: Vec<UpValueLocation>,
 }
 
 impl CallInfo {
@@ -12,11 +13,13 @@ impl CallInfo {
         Self {
             return_address: ptr::null(),
             stack_offset: 0,
+            locals_to_capture: vec![]
         }
     }
     pub fn set(&mut self, return_address: *const u8, stack_offset: usize) {
         self.return_address = return_address;
         self.stack_offset = stack_offset;
+        self.locals_to_capture.clear();
     }
 }
 
@@ -28,6 +31,29 @@ pub struct VM<'a> {
     globals: Box<[Option<Value>]>,
     call_stack: [CallInfo; 64],
     call_stack_ptr: *mut CallInfo,
+    upvalues: Vec<UpValue>,
+    closed_upvalues: Vec<Value>,
+}
+
+impl<'a> VM<'a> {
+    fn get_upvalue_value(&self, location: UpValueLocation) -> Value {
+        let upvalue = &self.upvalues[location.location()];
+        if upvalue.is_closed {
+            self.closed_upvalues[upvalue.location].clone()
+        }
+        else {
+            self.stack[upvalue.location].clone()
+        }
+    }
+    fn set_upvalue_value(&mut self, location: UpValueLocation, value: Value) {
+        let upvalue = &self.upvalues[location.location()];
+        if upvalue.is_closed {
+            self.closed_upvalues[upvalue.location] = value
+        }
+        else {
+            self.stack[upvalue.location] = value
+        }
+    }
 }
 
 macro_rules! build_comparison_op {
@@ -179,6 +205,8 @@ impl<'a> VM<'a> {
             globals: globals.into_boxed_slice(),
             call_stack: [CALL_STACK_REPEAT_VALUE; 64],
             call_stack_ptr: ptr::null_mut(),
+            upvalues: vec![],
+            closed_upvalues: vec![],
         }
     }
     fn reset_stack(&mut self) {
@@ -300,8 +328,9 @@ impl<'a> VM<'a> {
                     }
                     OpCode::SET_UPVALUE => {
                         let slot = self.read_byte() as usize;
+                        let value = self.peek(0);
                         if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
-                            self.stack[c.upvalues[slot].location] = self.peek(0);
+                            self.set_upvalue_value(c.upvalues[slot], value);
                         }
                         else {
                             panic!("This error should only occur if Tokers has made anything wrong!");
@@ -310,7 +339,7 @@ impl<'a> VM<'a> {
                     OpCode::GET_UPVALUE => {
                         let slot = self.read_byte() as usize;
                         if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
-                            self.push(self.stack[c.upvalues[slot].location].clone());
+                            self.push(self.get_upvalue_value(c.upvalues[slot]));
                         }
                         else {
                             panic!("This error should only occur if Tokers has made anything wrong!");
@@ -330,7 +359,7 @@ impl<'a> VM<'a> {
                                 else {
                                     closure.upvalues[i] = {
                                         if let Value::Closure(c) = self.stack[(*self.call_stack_ptr.sub(1)).stack_offset - 1].clone() {
-                                            c.upvalues[index].clone()
+                                            c.upvalues[index]
                                         }
                                         else {
                                             panic!("This error should only occur if Tokers has made anything wrong!");
@@ -342,6 +371,20 @@ impl<'a> VM<'a> {
                         }
                         else {
                             self.runtime_error("This error should never happen, unless my code is wrong!")?;
+                        }
+                    }
+                    OpCode::CLOSE_UPVALUE => {
+                        let index = self.stack_top.offset_from(self.stack.as_ptr()) as usize - 1;
+                        for upvalue_location in (*self.call_stack_ptr).locals_to_capture.iter_mut() {
+                            let upvalue = &mut self.upvalues[upvalue_location.location()];
+                            if upvalue.is_closed {
+                                continue;
+                            }
+                            if upvalue.location == index {
+                                upvalue.is_closed = true;
+                                self.closed_upvalues.push(self.stack[upvalue.location].clone());
+                                upvalue.location = self.closed_upvalues.len() - 1;
+                            }
                         }
                     }
                     OpCode::POP => {self.pop();},
@@ -414,9 +457,15 @@ impl<'a> VM<'a> {
                     OpCode::RETURN => {
                         let return_value = self.pop();
                         self.call_stack_ptr = self.call_stack_ptr.sub(1);
+                        for upvalue_location in (*self.call_stack_ptr).locals_to_capture.iter_mut() {
+                            let upvalue = &mut self.upvalues[upvalue_location.location()];
+                            upvalue.is_closed = true;
+                            self.closed_upvalues.push(self.stack[upvalue.location].clone());
+                            upvalue.location = self.closed_upvalues.len() - 1;
+                        }
                         self.stack_top = self.stack.as_mut_ptr().add((*self.call_stack_ptr).stack_offset - 1);
-                        self.ip = (*self.call_stack_ptr).return_address;
                         self.push(return_value);
+                        self.ip = (*self.call_stack_ptr).return_address;
                     },
                     OpCode::EOF => return Ok(self.pop()),
                     _ => {
@@ -426,7 +475,6 @@ impl<'a> VM<'a> {
             }
         }
     }
-
     unsafe fn push(&mut self, value: Value) {
         *self.stack_top = value;
         self.stack_top = self.stack_top.add(1);
@@ -438,10 +486,27 @@ impl<'a> VM<'a> {
     unsafe fn peek(&mut self, distance: usize) -> Value {
         (*self.stack_top.sub(1 + distance)).clone()
     }
-
-    fn capture_upvalue(&self, local: usize) -> UpValue {
-        let created_upvalue = UpValue::new(local);
-        created_upvalue
+    unsafe fn capture_upvalue(&mut self, local: usize) -> UpValueLocation {
+        let local = UpValue::new(local);
+        let index = self.upvalues.iter().enumerate().find_map(|(index, value)| {
+            if *value == local {
+                Some(index)
+            } else {
+                None
+            }
+        });
+        match index {
+            Some(i) => {
+                UpValueLocation::new(i)
+            },
+            None => {
+                self.upvalues.push(local);
+                let location = UpValueLocation::new(self.upvalues.len() - 1);
+                let locals_to_capture = &mut (*self.call_stack_ptr.sub(1)).locals_to_capture;
+                locals_to_capture.push(location);
+                location
+            },
+        }
     }
 
     pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
