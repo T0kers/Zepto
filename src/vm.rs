@@ -509,12 +509,12 @@ impl<'a> VM<'a> {
         }
     }
 
-    pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> { // TODO: this function should maybe be turned into a macro.
+    pub unsafe fn runtime_error(&mut self, msg: &str) -> Result<(), VMError> {
         self.reset_stack();
         Err(VMError::runtime_error(format!("{} [Line {}] in script.", msg, self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize))))
     }
 
-    pub unsafe fn runtime_value_error(&mut self, msg: &str) -> Result<Value, VMError> { // TODO: this function should maybe be turned into a macro.
+    pub unsafe fn runtime_value_error(&mut self, msg: &str) -> Result<Value, VMError> {
         self.reset_stack();
         Err(VMError::runtime_error(format!("{} [Line {}] in script.", msg, self.chunk.line((self.ip.offset_from(self.chunk.code.as_ptr()) - 1) as usize))))
     }

@@ -5,12 +5,10 @@ let globalGet;
 fn run() {
   {
     let a = "initial";
-    let c = "yeee";
 
     globalSet = fn() { a = "updated"; };
     globalGet = fn() { print(a); };
   }
-  let b = "hmmm!";
 }
 
 fn main() {

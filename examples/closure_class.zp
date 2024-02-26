@@ -1,0 +1,50 @@
+
+
+
+fn create_point(x, y) {
+    return fn(i) {
+        if i == "x" {
+            return x;
+        }
+        else if i == "y" {
+            return y;
+        }
+        else if i == "display" {
+            return format("(", x, ", ", y, ")");
+        }
+        else if i == "set_x" {
+            return fn(val) {
+                x = val;
+            };
+        }
+        else if i == "set_y" {
+            return fn(val) {
+                y = val;
+            };
+        }
+        else if i == "+" {
+            return fn(other) {
+                return create_point(
+                    x + other("x"),
+                    y + other("y")
+                );
+            };
+        }
+        else if i == "-" {
+            return fn(other) {
+                return create_point(
+                    x - other("x"),
+                    y - other("y")
+                );
+            };
+        }
+    };
+}
+
+fn main() {
+    let p1 = create_point(1, 2);
+    p1("set_x")(3);
+    let p2 = create_point(4, 3);
+    let p3 = p1("-")(p2);
+    print(p3("display"));
+}

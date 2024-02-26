@@ -187,9 +187,7 @@ impl Locals {
         scope_info.indexes.reverse();
         self.current_function_mut().next_local -= scope_info.count;
         let mut result = vec![0];
-        println!("------------------");
-        for (k, local) in &scope_info.indexes {
-            println!("{} {:?}", k, local);
+        for (_, local) in &scope_info.indexes {
             if result.len() % 2 == 0 {
                 if local.is_captured {
                     *result.last_mut().unwrap() += 1;
@@ -205,8 +203,6 @@ impl Locals {
                 *result.last_mut().unwrap() += 1;
             }
         }
-        println!("********************");
-        println!("{:?}", result);
         result
     }
     fn current_function(&self) -> &FunctionInfo {
@@ -654,7 +650,6 @@ impl<'a> Compiler<'a> {
     fn end_scope(&mut self) {
         let info = self.locals.end_scope();
         for (i, amount) in info.iter().enumerate() {
-            println!("i: {}", i);
             if i % 2 == 0 {
                 if *amount > 2 {
                     self.emit_bytes(OpCode::POP_SCOPE, *amount);
@@ -667,7 +662,6 @@ impl<'a> Compiler<'a> {
             }
             else {
                 for _ in 0..*amount {
-                    println!("aqsdasdfadsdsa");
                     self.emit_byte(OpCode::CLOSE_UPVALUE);
                 }
             }
@@ -964,7 +958,7 @@ impl<'a> Compiler<'a> {
     }
     fn emit_string(&mut self) -> Result<(), VMError> {
         self.emit_constant(Value::Str(Box::new(
-            self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string() // TODO: make the amazing æ, ø and å work PLEASE!!!!!!!
+            self.previous.lexeme(self.scanner.source)[1..self.previous.lexeme(self.scanner.source).len() - 1].to_string()
         )))
     }
     fn emit_define_variable(&mut self, id: u16) {
@@ -1157,7 +1151,7 @@ impl<'a> Compiler<'a> {
         while self.current.kind != TokenKind::EOF {
             if self.previous.kind == TokenKind::Semicolon {return;}
             match self.current.kind {
-                TokenKind::Return | TokenKind::Let => return, // TODO: add more keywords
+                TokenKind::Return | TokenKind::Let | TokenKind::If | TokenKind::While | TokenKind::For | TokenKind::Class => return, // TODO: add more keywords
                 _ => match self.advance() {
                     Ok(_) => continue,
                     Err(e) => self.synchronize(e),
@@ -1166,4 +1160,3 @@ impl<'a> Compiler<'a> {
         }
     }
 }
-

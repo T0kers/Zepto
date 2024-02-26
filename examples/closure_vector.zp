@@ -1,0 +1,53 @@
+
+
+fn create_vector() {
+    let item;
+    let next;
+    return fn(func) {
+        if func == "push" {
+            return fn(value) {
+                if next == nul {
+                    next = create_vector();
+                    item = value;
+                }
+                else {
+                    next("push")(value);
+                }
+            };
+        }
+        else if func == "get" {
+            return fn(index) {
+                if index <= 0 {
+                    return item;
+                }
+                else {
+                    return next("get")(index - 1);
+                }
+            };
+        }
+        else if func == "display" {
+            if next == nul {
+                return format("[", item, "]");
+            }
+            else {
+                return format("[", item, ", ", next("display"), "]");
+            }
+        }
+    };
+}
+
+fn main() {
+    let vec = create_vector();
+    print(vec("display"));
+    vec("push")(1);
+    print(vec("display"));
+    vec("push")(2);
+    print(vec("display"));
+    vec("push")(4);
+    print(vec("display"));
+    print(vec("get")(0));
+    print(vec("get")(1));
+    print(vec("get")(2));
+    print(vec("get")(3));
+    print(vec("get")(4));
+}

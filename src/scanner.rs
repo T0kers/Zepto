@@ -32,7 +32,7 @@ pub enum TokenKind {
     EOF,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub kind: TokenKind,
     pub start: usize,
@@ -199,7 +199,7 @@ impl<'a> Scanner<'a> {
                     }
                     Token::new_identifier(self.source, self.start, self.current, self.line)
                 }
-                _ => Token::error(String::from("bruh"), self.start, self.current, self.line),
+                ch => Token::error(format!("{} is not recognised character.", ch), self.start, self.current, self.line),
             }
         }
         else {
@@ -229,17 +229,20 @@ impl<'a> Scanner<'a> {
     }
     
     fn advance(&mut self) -> Option<char> {
-        self.current += 1;
-        self.source.chars().nth(self.current - 1)
+        if let Some(ch) = self.source[self.current..].chars().next() {
+            self.current += ch.len_utf8();
+            Some(ch)
+        } else {
+            None
+        }
     }
 
     fn peek(&self) -> Option<char> {
-        self.source.chars().nth(self.current)
+        self.source[self.current..].chars().next()
     }
 
     fn peek_next(&self) -> Option<char> {
-        if self.is_at_end() {None}
-        else {self.source.chars().nth(self.current + 1)}
+        self.source[self.current..].chars().nth(1)
     }
 
     fn compare(&self, expected: char) -> bool {
